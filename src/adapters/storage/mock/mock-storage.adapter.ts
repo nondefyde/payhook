@@ -22,6 +22,8 @@ import {
   Money,
   ProcessingStatus,
   OutboxStatus,
+  WebhookQuery,
+  OutboxQuery,
 } from '../../../core';
 
 /**
@@ -173,6 +175,115 @@ export class MockStorageAdapter implements StorageAdapter {
     return transactionId ? this.transactions.get(transactionId) || null : null;
   }
 
+  async findTransactions(
+    query: TransactionQuery,
+    pagination?: Pagination,
+  ): Promise<Transaction[]> {
+    await this.simulateLatency();
+
+    let filtered = Array.from(this.transactions.values());
+
+    // Apply query filters
+    if (query.id) {
+      filtered = filtered.filter((t) => t.id === query.id);
+    }
+    if (query.applicationRef) {
+      filtered = filtered.filter(
+        (t) => t.applicationRef === query.applicationRef,
+      );
+    }
+    if (query.providerRef) {
+      filtered = filtered.filter((t) => t.providerRef === query.providerRef);
+    }
+    if (query.provider) {
+      filtered = filtered.filter((t) => t.provider === query.provider);
+    }
+    if (query.status) {
+      filtered = filtered.filter((t) => t.status === query.status);
+    }
+    if (query.createdAfter) {
+      filtered = filtered.filter((t) => t.createdAt >= query.createdAfter!);
+    }
+    if (query.createdBefore) {
+      filtered = filtered.filter((t) => t.createdAt <= query.createdBefore!);
+    }
+
+    // Apply pagination if provided
+    if (pagination) {
+      const start = (pagination.page - 1) * pagination.limit;
+      filtered = filtered.slice(start, start + pagination.limit);
+    }
+
+    return filtered;
+  }
+
+  async countTransactions(query: TransactionQuery): Promise<number> {
+    await this.simulateLatency();
+
+    let filtered = Array.from(this.transactions.values());
+
+    // Apply query filters
+    if (query.id) {
+      filtered = filtered.filter((t) => t.id === query.id);
+    }
+    if (query.applicationRef) {
+      filtered = filtered.filter(
+        (t) => t.applicationRef === query.applicationRef,
+      );
+    }
+    if (query.providerRef) {
+      filtered = filtered.filter((t) => t.providerRef === query.providerRef);
+    }
+    if (query.provider) {
+      filtered = filtered.filter((t) => t.provider === query.provider);
+    }
+    if (query.status) {
+      filtered = filtered.filter((t) => t.status === query.status);
+    }
+    if (query.createdAfter) {
+      filtered = filtered.filter((t) => t.createdAt >= query.createdAfter!);
+    }
+    if (query.createdBefore) {
+      filtered = filtered.filter((t) => t.createdAt <= query.createdBefore!);
+    }
+
+    return filtered.length;
+  }
+
+  async updateTransaction(
+    id: string,
+    updates: Partial<Transaction>,
+  ): Promise<Transaction> {
+    await this.simulateLatency();
+
+    const transaction = this.transactions.get(id);
+    if (!transaction) {
+      throw new Error(`Transaction not found: ${id}`);
+    }
+
+    // Apply updates
+    Object.assign(transaction, updates);
+    this.transactions.set(id, transaction);
+
+    return transaction;
+  }
+
+  async linkProviderRef(
+    transactionId: string,
+    providerRef: string,
+  ): Promise<void> {
+    await this.simulateLatency();
+
+    const transaction = this.transactions.get(transactionId);
+    if (!transaction) {
+      throw new Error(`Transaction not found: ${transactionId}`);
+    }
+
+    transaction.linkProviderRef(providerRef);
+    this.transactions.set(transactionId, transaction);
+    this.transactionsByProviderRef.set(providerRef, transactionId);
+  }
+
   async listTransactions(
     filter: TransactionFilter,
     pagination: Pagination,
@@ -311,6 +422,127 @@ export class MockStorageAdapter implements StorageAdapter {
     return webhookLog;
   }
 
+  async findWebhookLogs(
+    criteria: Partial<WebhookLog>,
+    pagination?: Pagination,
+  ): Promise<WebhookLog[]> {
+    await this.simulateLatency();
+
+    let filtered = Array.from(this.webhookLogs.values());
+
+    // Apply criteria filters
+    if (criteria.id) {
+      filtered = filtered.filter((w) => w.id === criteria.id);
+    }
+    if (criteria.provider) {
+      filtered = filtered.filter((w) => w.provider === criteria.provider);
+    }
+    if (criteria.providerEventId) {
+      filtered = filtered.filter(
+        (w) => w.providerEventId === criteria.providerEventId,
+      );
+    }
+    if (criteria.eventType) {
+      filtered = filtered.filter((w) => w.eventType === criteria.eventType);
+    }
+    if (criteria.processingStatus !== undefined) {
+      filtered = filtered.filter(
+        (w) => w.processingStatus === criteria.processingStatus,
+      );
+    }
+    if (criteria.transactionId) {
+      filtered = filtered.filter(
+        (w) => w.transactionId === criteria.transactionId,
+      );
+    }
+    if (criteria.signatureValid !== undefined) {
+      filtered = filtered.filter(
+        (w) => w.signatureValid === criteria.signatureValid,
+      );
+    }
+
+    // Apply pagination if provided
+    if (pagination) {
+      const start = (pagination.page - 1) * pagination.limit;
+      filtered = filtered.slice(start, start + pagination.limit);
+    }
+
+    return filtered;
+  }
+
+  async updateWebhookLogStatus(
+    id: string,
+    status: any,
+    errorMessage?: string,
+  ): Promise<WebhookLog> {
+    await this.simulateLatency();
+
+    const webhookLog = this.webhookLogs.get(id);
+    if (!webhookLog) {
+      throw new Error(`Webhook log not found: ${id}`);
+    }
+
+    webhookLog.processingStatus = status;
+    if (errorMessage !== undefined) {
+      webhookLog.errorMessage = errorMessage;
+    }
+    this.webhookLogs.set(id, webhookLog);
+
+    return webhookLog;
+  }
+
+  async linkWebhookToTransaction(
+    webhookId: string,
+    transactionId: string,
+  ): Promise<void> {
+    await this.simulateLatency();
+
+    const webhookLog = this.webhookLogs.get(webhookId);
+    if (!webhookLog) {
+      throw new Error(`Webhook log not found: ${webhookId}`);
+    }
+
+    webhookLog.transactionId = transactionId;
+    this.webhookLogs.set(webhookId, webhookLog);
+  }
+
+  async countWebhookLogs(query: WebhookQuery): Promise<number> {
+    await this.simulateLatency();
+
+    let filtered = Array.from(this.webhookLogs.values());
+
+    // Apply query filters
+    if (query.id) {
+      filtered = filtered.filter((w) => w.id === query.id);
+    }
+    if (query.provider) {
+      filtered = filtered.filter((w) => w.provider === query.provider);
+    }
+    if (query.providerEventId) {
+      filtered = filtered.filter(
+        (w) => w.providerEventId === query.providerEventId,
+      );
+    }
+    if (query.transactionId) {
+      filtered = filtered.filter(
+        (w) => w.transactionId === query.transactionId,
+      );
+    }
+    if (query.processingStatus !== undefined) {
+      filtered = filtered.filter(
+        (w) => w.processingStatus === query.processingStatus,
+      );
+    }
+    if (query.receivedAfter) {
+      filtered = filtered.filter((w) => w.receivedAt >= query.receivedAfter!);
+    }
+    if (query.receivedBefore) {
+      filtered = filtered.filter((w) => w.receivedAt <= query.receivedBefore!);
+    }
+
+    return filtered.length;
+  }
+
   async listUnmatchedWebhooks(
     filter: UnmatchedFilter,
     pagination: Pagination,
@@ -402,12 +634,12 @@ export class MockStorageAdapter implements StorageAdapter {
     const auditLog = new AuditLog(
       id,
       dto.transactionId,
-      dto.fromStatus,
-      dto.toStatus,
+      dto.fromStatus !== undefined ? dto.fromStatus : null,
+      dto.toStatus!,
       dto.triggerType as any,
       new Date(),
       dto.webhookLogId,
-      dto.reconciliationResult as any,
+      dto.reconciliationResult !== undefined ? dto.reconciliationResult : null,
       dto.verificationMethod as any,
       dto.metadata,
       dto.actor,
@@ -427,6 +659,11 @@ export class MockStorageAdapter implements StorageAdapter {
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
     return trail;
+  }
+
+  async getAuditLogs(transactionId: string): Promise<AuditLog[]> {
+    // Alias for getAuditTrail
+    return this.getAuditTrail(transactionId);
   }
 
   async listAuditLogs(
@@ -509,7 +746,7 @@ export class MockStorageAdapter implements StorageAdapter {
 
     const outboxEvent = OutboxEvent.forTransactionEvent(
       id,
-      dto.transactionId,
+      dto.transactionId || dto.aggregateId || '',
       dto.eventType,
       dto.payload,
       dto.metadata,
@@ -568,6 +805,41 @@ export class MockStorageAdapter implements StorageAdapter {
     return Array.from(this.outboxEvents.values())
       .filter((e) => e.isStale(olderThanMinutes))
       .slice(0, limit);
+  }
+
+  async getOutboxEvents(query: OutboxQuery): Promise<OutboxEvent[]> {
+    await this.simulateLatency();
+
+    let filtered = Array.from(this.outboxEvents.values());
+
+    // Apply query filters
+    if (query.id) {
+      filtered = filtered.filter((e) => e.id === query.id);
+    }
+    if (query.transactionId) {
+      filtered = filtered.filter(
+        (e) => e.transactionId === query.transactionId,
+      );
+    }
+    if (query.aggregateId) {
+      filtered = filtered.filter((e) => e.transactionId === query.aggregateId);
+    }
+    if (query.eventType) {
+      filtered = filtered.filter((e) => e.eventType === query.eventType);
+    }
+    if (query.status) {
+      filtered = filtered.filter((e) => e.status === query.status);
+    }
+    if (query.scheduledBefore) {
+      filtered = filtered.filter((e) => e.createdAt <= query.scheduledBefore!);
+    }
+
+    // Apply limit if provided
+    if (query.limit) {
+      filtered = filtered.slice(0, query.limit);
+    }
+
+    return filtered;
   }
 
   // ==================== Retention & Cleanup ====================

@@ -1,4 +1,4 @@
-import { MockProviderAdapter } from '../adapters/providers/mock';
+import { MockProviderAdapter } from '../../adapters/providers/mock';
 
 /**
  * Factory for generating mock webhook payloads
@@ -100,7 +100,11 @@ export class MockWebhookFactory {
     };
 
     const event = options.partial ? 'refund.partial' : 'refund.success';
-    const { body, headers } = provider.generateSignedWebhook(event, data, secret);
+    const { body, headers } = provider.generateSignedWebhook(
+      event,
+      data,
+      secret,
+    );
 
     return {
       body,
@@ -234,14 +238,17 @@ export class MockWebhookFactory {
   /**
    * Generate a duplicate webhook (same event ID)
    */
-  static duplicate(original: WebhookPayload, options: { delayMs?: number } = {}): WebhookPayload {
+  static duplicate(
+    original: WebhookPayload,
+    options: { delayMs?: number } = {},
+  ): WebhookPayload {
     const duplicate = { ...original };
 
     if (options.delayMs) {
       // Simulate delayed duplicate with different timestamp
       const payload = JSON.parse(original.body.toString());
       payload.created_at = new Date(
-        new Date(payload.created_at).getTime() + options.delayMs
+        new Date(payload.created_at).getTime() + options.delayMs,
       ).toISOString();
       duplicate.body = Buffer.from(JSON.stringify(payload));
     }
@@ -256,17 +263,18 @@ export class MockWebhookFactory {
     const webhooks: WebhookPayload[] = [];
 
     for (let i = 0; i < count; i++) {
-      const webhook = i % 2 === 0
-        ? this.paymentSuccessful({
-            ...options,
-            reference: `${options.reference || 'batch'}_${i}`,
-            applicationRef: `${options.applicationRef || 'app'}_${i}`,
-          })
-        : this.paymentFailed({
-            ...options,
-            reference: `${options.reference || 'batch'}_${i}`,
-            applicationRef: `${options.applicationRef || 'app'}_${i}`,
-          });
+      const webhook =
+        i % 2 === 0
+          ? this.paymentSuccessful({
+              ...options,
+              reference: `${options.reference || 'batch'}_${i}`,
+              applicationRef: `${options.applicationRef || 'app'}_${i}`,
+            })
+          : this.paymentFailed({
+              ...options,
+              reference: `${options.reference || 'batch'}_${i}`,
+              applicationRef: `${options.applicationRef || 'app'}_${i}`,
+            });
 
       webhooks.push(webhook);
     }
@@ -384,7 +392,9 @@ export class WebhookScenarios {
   } {
     const original = MockWebhookFactory.paymentSuccessful();
     const duplicate = MockWebhookFactory.duplicate(original);
-    const delayedDuplicate = MockWebhookFactory.duplicate(original, { delayMs: 5000 });
+    const delayedDuplicate = MockWebhookFactory.duplicate(original, {
+      delayMs: 5000,
+    });
 
     return { original, duplicate, delayedDuplicate };
   }

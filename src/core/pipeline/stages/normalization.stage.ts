@@ -1,8 +1,4 @@
-import {
-  PipelineStage,
-  WebhookContext,
-  StageResult,
-} from '../types';
+import { PipelineStage, WebhookContext, StageResult } from '../types';
 import {
   PaymentProviderAdapter,
   ProcessingStatus,
@@ -102,7 +98,8 @@ export class NormalizationStage implements PipelineStage {
       if (!context.processingStatus) {
         context.processingStatus = ProcessingStatus.NORMALIZATION_FAILED;
       }
-      context.normalizationError = error instanceof Error ? error.message : 'Unknown error';
+      context.normalizationError =
+        error instanceof Error ? error.message : 'Unknown error';
 
       return {
         success: false,

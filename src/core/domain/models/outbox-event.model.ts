@@ -80,8 +80,7 @@ export class OutboxEvent {
    */
   shouldRetry(maxRetries: number): boolean {
     return (
-      this.status === OutboxStatus.FAILED &&
-      this.attemptCount < maxRetries
+      this.status === OutboxStatus.FAILED && this.attemptCount < maxRetries
     );
   }
 

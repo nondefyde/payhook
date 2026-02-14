@@ -51,9 +51,11 @@ export interface PayHookMiddlewareConfig {
     flutterwave?: {
       allowedIps?: string[];
     };
-    [key: string]: {
-      allowedIps?: string[];
-    } | undefined;
+    [key: string]:
+      | {
+          allowedIps?: string[];
+        }
+      | undefined;
   };
 }
 
@@ -97,7 +99,9 @@ export class PayHookMiddlewareModule {
     const providerIpMappings: Record<string, string[]> = {};
 
     if (config?.providers) {
-      for (const [provider, providerConfig] of Object.entries(config.providers)) {
+      for (const [provider, providerConfig] of Object.entries(
+        config.providers,
+      )) {
         if (providerConfig?.allowedIps) {
           providerIpMappings[provider] = providerConfig.allowedIps;
         }
@@ -121,10 +125,11 @@ export class PayHookMiddlewareModule {
       },
       {
         provide: PayHookIpAllowlistGuard,
-        useFactory: () => new PayHookIpAllowlistGuard({
-          ...config?.ipAllowlist,
-          providerIpMappings,
-        }),
+        useFactory: () =>
+          new PayHookIpAllowlistGuard({
+            ...config?.ipAllowlist,
+            providerIpMappings,
+          }),
       },
       {
         provide: PayHookSecurityGuard,
@@ -148,7 +153,11 @@ export class PayHookMiddlewareModule {
             },
           });
         },
-        inject: [PayHookRateLimitGuard, PayHookBodySizeGuard, PayHookIpAllowlistGuard],
+        inject: [
+          PayHookRateLimitGuard,
+          PayHookBodySizeGuard,
+          PayHookIpAllowlistGuard,
+        ],
       },
       {
         provide: 'PAYHOOK_MIDDLEWARE_CONFIG',
@@ -171,7 +180,9 @@ export class PayHookMiddlewareModule {
 
   static forRootAsync(options: {
     imports?: any[];
-    useFactory: (...args: any[]) => Promise<PayHookMiddlewareConfig> | PayHookMiddlewareConfig;
+    useFactory: (
+      ...args: any[]
+    ) => Promise<PayHookMiddlewareConfig> | PayHookMiddlewareConfig;
     inject?: any[];
   }): DynamicModule {
     const configProvider = {
@@ -183,12 +194,14 @@ export class PayHookMiddlewareModule {
     const guardProviders = [
       {
         provide: PayHookRateLimitGuard,
-        useFactory: (config: PayHookMiddlewareConfig) => new PayHookRateLimitGuard(config?.rateLimit),
+        useFactory: (config: PayHookMiddlewareConfig) =>
+          new PayHookRateLimitGuard(config?.rateLimit),
         inject: ['PAYHOOK_MIDDLEWARE_CONFIG'],
       },
       {
         provide: PayHookBodySizeGuard,
-        useFactory: (config: PayHookMiddlewareConfig) => new PayHookBodySizeGuard(config?.bodySize),
+        useFactory: (config: PayHookMiddlewareConfig) =>
+          new PayHookBodySizeGuard(config?.bodySize),
         inject: ['PAYHOOK_MIDDLEWARE_CONFIG'],
       },
       {
@@ -198,7 +211,9 @@ export class PayHookMiddlewareModule {
           const providerIpMappings: Record<string, string[]> = {};
 
           if (config?.providers) {
-            for (const [provider, providerConfig] of Object.entries(config.providers)) {
+            for (const [provider, providerConfig] of Object.entries(
+              config.providers,
+            )) {
               if (providerConfig?.allowedIps) {
                 providerIpMappings[provider] = providerConfig.allowedIps;
               }
@@ -206,7 +221,10 @@ export class PayHookMiddlewareModule {
           }
 
           if (config?.ipAllowlist?.providerIpMappings) {
-            Object.assign(providerIpMappings, config.ipAllowlist.providerIpMappings);
+            Object.assign(
+              providerIpMappings,
+              config.ipAllowlist.providerIpMappings,
+            );
           }
 
           return new PayHookIpAllowlistGuard({
@@ -222,7 +240,9 @@ export class PayHookMiddlewareModule {
           const providerIpMappings: Record<string, string[]> = {};
 
           if (config?.providers) {
-            for (const [provider, providerConfig] of Object.entries(config.providers)) {
+            for (const [provider, providerConfig] of Object.entries(
+              config.providers,
+            )) {
               if (providerConfig?.allowedIps) {
                 providerIpMappings[provider] = providerConfig.allowedIps;
               }
@@ -230,7 +250,10 @@ export class PayHookMiddlewareModule {
           }
 
           if (config?.ipAllowlist?.providerIpMappings) {
-            Object.assign(providerIpMappings, config.ipAllowlist.providerIpMappings);
+            Object.assign(
+              providerIpMappings,
+              config.ipAllowlist.providerIpMappings,
+            );
           }
 
           return new PayHookSecurityGuard({
@@ -272,11 +295,7 @@ export class PayHookMiddlewareModule {
  * These are example IPs - always verify with your provider's documentation
  */
 export const KNOWN_PROVIDER_IPS = {
-  paystack: [
-    '52.31.139.75',
-    '52.49.173.169',
-    '52.214.14.220',
-  ],
+  paystack: ['52.31.139.75', '52.49.173.169', '52.214.14.220'],
   stripe: [
     // Stripe publishes their webhook IPs dynamically
     // See: https://stripe.com/docs/ips

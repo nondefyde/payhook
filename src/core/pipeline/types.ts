@@ -80,6 +80,7 @@ export interface PipelineConfig {
   skipSignatureVerification?: boolean; // DANGEROUS: only for testing
   storeRawPayload?: boolean;
   redactKeys?: string[];
+  secrets?: Map<string, string[]>; // Webhook secrets per provider
 
   // Lifecycle hooks
   hooks?: LifecycleHooks;

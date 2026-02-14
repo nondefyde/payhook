@@ -146,7 +146,7 @@ export class StateMachineValidator {
   private validateTransitionConsistency(): void {
     // Failed state should be reachable only from Processing
     const toFailed = this.transitions.filter(
-      t => t.to === TransactionStatus.FAILED,
+      (t) => t.to === TransactionStatus.FAILED,
     );
     for (const transition of toFailed) {
       if (transition.from !== TransactionStatus.PROCESSING) {
@@ -158,7 +158,7 @@ export class StateMachineValidator {
 
     // Successful should only be reachable from Processing
     const toSuccessful = this.transitions.filter(
-      t => t.to === TransactionStatus.SUCCESSFUL,
+      (t) => t.to === TransactionStatus.SUCCESSFUL,
     );
     for (const transition of toSuccessful) {
       if (transition.from !== TransactionStatus.PROCESSING) {
@@ -170,7 +170,7 @@ export class StateMachineValidator {
 
     // Refund states should only be reachable from Successful or PartiallyRefunded
     const toRefunded = this.transitions.filter(
-      t =>
+      (t) =>
         t.to === TransactionStatus.REFUNDED ||
         t.to === TransactionStatus.PARTIALLY_REFUNDED,
     );
@@ -191,7 +191,7 @@ export class StateMachineValidator {
       TransactionStatus.RESOLVED_WON,
       TransactionStatus.RESOLVED_LOST,
     ];
-    const toResolution = this.transitions.filter(t =>
+    const toResolution = this.transitions.filter((t) =>
       resolutionStates.includes(t.to),
     );
     for (const transition of toResolution) {

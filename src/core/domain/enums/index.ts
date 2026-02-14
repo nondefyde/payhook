@@ -6,3 +6,4 @@ export * from './normalized-event-type.enum';
 export * from './trigger-type.enum';
 export * from './dispatch-status.enum';
 export * from './reconciliation-result.enum';
+export * from './audit-action.enum';

@@ -4,7 +4,22 @@
  */
 export enum NormalizedEventType {
   /**
-   * Payment completed and funds captured
+   * Payment authorized but not yet captured
+   */
+  PAYMENT_AUTHORIZED = 'payment.authorized',
+
+  /**
+   * Payment captured and processing
+   */
+  PAYMENT_CAPTURED = 'payment.captured',
+
+  /**
+   * Payment completed successfully
+   */
+  PAYMENT_SUCCEEDED = 'payment.succeeded',
+
+  /**
+   * Payment completed and funds captured (alias)
    */
   PAYMENT_SUCCESSFUL = 'payment.successful',
 
@@ -19,9 +34,24 @@ export enum NormalizedEventType {
   PAYMENT_ABANDONED = 'payment.abandoned',
 
   /**
+   * Payment was cancelled
+   */
+  PAYMENT_CANCELLED = 'payment.cancelled',
+
+  /**
+   * Payment expired
+   */
+  PAYMENT_EXPIRED = 'payment.expired',
+
+  /**
    * Refund completed (full or partial)
    */
   REFUND_SUCCESSFUL = 'refund.successful',
+
+  /**
+   * Refund completed (alternative name)
+   */
+  REFUND_COMPLETED = 'refund.completed',
 
   /**
    * Refund attempt failed
@@ -34,12 +64,47 @@ export enum NormalizedEventType {
   REFUND_PENDING = 'refund.pending',
 
   /**
+   * Refund initiated
+   */
+  REFUND_INITIATED = 'refund.initiated',
+
+  /**
+   * Partial refund completed
+   */
+  REFUND_PARTIAL = 'refund.partial',
+
+  /**
    * Chargeback or dispute opened
    */
   CHARGE_DISPUTED = 'charge.disputed',
 
   /**
+   * Dispute created (alternative name)
+   */
+  DISPUTE_CREATED = 'dispute.created',
+
+  /**
    * Dispute resolved (won or lost)
    */
   DISPUTE_RESOLVED = 'dispute.resolved',
+
+  /**
+   * Dispute won
+   */
+  DISPUTE_WON = 'dispute.won',
+
+  /**
+   * Dispute lost
+   */
+  DISPUTE_LOST = 'dispute.lost',
+
+  /**
+   * Dispute cancelled
+   */
+  DISPUTE_CANCELLED = 'dispute.cancelled',
+
+  /**
+   * Unknown event type
+   */
+  UNKNOWN = 'unknown',
 }

@@ -10,6 +10,7 @@ import {
   ProcessingStatus,
   NormalizedEventType,
   TransactionService,
+  TriggerType,
 } from '../../src';
 
 describe('Paystack Integration Tests', () => {
@@ -78,12 +79,19 @@ describe('Paystack Integration Tests', () => {
 
       // Track events
       const dispatchedEvents: any[] = [];
-      eventDispatcher.on(NormalizedEventType.PAYMENT_SUCCEEDED, async (type, payload) => {
-        dispatchedEvents.push(payload);
-      });
+      eventDispatcher.on(
+        NormalizedEventType.PAYMENT_SUCCEEDED,
+        async (type, payload) => {
+          dispatchedEvents.push(payload);
+        },
+      );
 
       // Process webhook with correct secret
-      const result = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       // Verify processing succeeded
       expect(result.success).toBe(true);
@@ -96,9 +104,13 @@ describe('Paystack Integration Tests', () => {
 
       // Verify event was dispatched
       expect(dispatchedEvents).toHaveLength(1);
-      expect(dispatchedEvents[0].normalized.eventType).toBe(NormalizedEventType.PAYMENT_SUCCEEDED);
+      expect(dispatchedEvents[0].normalized.eventType).toBe(
+        NormalizedEventType.PAYMENT_SUCCEEDED,
+      );
       expect(dispatchedEvents[0].normalized.amount).toBe(10000);
-      expect(dispatchedEvents[0].normalized.customer?.email).toBe('customer@example.com');
+      expect(dispatchedEvents[0].normalized.customer?.email).toBe(
+        'customer@example.com',
+      );
     });
 
     it('should reject Paystack webhook with invalid signature', async () => {
@@ -109,7 +121,11 @@ describe('Paystack Integration Tests', () => {
       );
 
       // Process with correct secret (will fail signature check)
-      const result = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result.success).toBe(false);
       expect(result.processingStatus).toBe(ProcessingStatus.SIGNATURE_FAILED);
@@ -139,11 +155,10 @@ describe('Paystack Integration Tests', () => {
         TransactionStatus.SUCCESSFUL,
         {
           transactionId: transaction.id,
-          action: 'WEBHOOK_STATE_TRANSITION',
-          performedBy: 'system',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PROCESSING,
-          stateAfter: TransactionStatus.SUCCESSFUL,
+          fromStatus: TransactionStatus.PROCESSING,
+          toStatus: TransactionStatus.SUCCESSFUL,
+          triggerType: TriggerType.WEBHOOK,
+          actor: 'system',
         },
       );
 
@@ -160,12 +175,19 @@ describe('Paystack Integration Tests', () => {
 
       // Track refund events
       const refundEvents: any[] = [];
-      eventDispatcher.on(NormalizedEventType.REFUND_COMPLETED, async (type, payload) => {
-        refundEvents.push(payload);
-      });
+      eventDispatcher.on(
+        NormalizedEventType.REFUND_COMPLETED,
+        async (type, payload) => {
+          refundEvents.push(payload);
+        },
+      );
 
       // Process refund webhook
-      const result = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result.success).toBe(true);
 
@@ -175,7 +197,9 @@ describe('Paystack Integration Tests', () => {
 
       // Verify refund event was dispatched
       expect(refundEvents).toHaveLength(1);
-      expect(refundEvents[0].normalized.eventType).toBe(NormalizedEventType.REFUND_COMPLETED);
+      expect(refundEvents[0].normalized.eventType).toBe(
+        NormalizedEventType.REFUND_COMPLETED,
+      );
     });
 
     it('should handle Paystack subscription.create webhook', async () => {
@@ -189,7 +213,11 @@ describe('Paystack Integration Tests', () => {
         TEST_SECRET,
       );
 
-      const result = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result.success).toBe(true);
 
@@ -212,8 +240,8 @@ describe('Paystack Integration Tests', () => {
             provider: 'paystack',
             amount: (i + 1) * 1000,
             currency: 'NGN',
-          })
-        )
+          }),
+        ),
       );
 
       // Generate batch of webhooks
@@ -226,26 +254,26 @@ describe('Paystack Integration Tests', () => {
             orderId: txn.applicationRef,
           },
           TEST_SECRET,
-        )
+        ),
       );
 
       // Process all webhooks
       const results = await Promise.all(
-        webhooks.map(webhook =>
-          processor.processWebhook('paystack', webhook.body, webhook.headers)
-        )
+        webhooks.map((webhook) =>
+          processor.processWebhook('paystack', webhook.body, webhook.headers),
+        ),
       );
 
       // Verify all processed
-      expect(results.every(r => r.success)).toBe(true);
+      expect(results.every((r) => r.success)).toBe(true);
 
       // Check transaction statuses
       const updated = await Promise.all(
-        transactions.map(t => service.getTransaction(t.id))
+        transactions.map((t) => service.getTransaction(t.id)),
       );
 
       expect(updated[0]?.status).toBe(TransactionStatus.SUCCESSFUL); // charge.success
-      expect(updated[1]?.status).toBe(TransactionStatus.FAILED);     // charge.failed
+      expect(updated[1]?.status).toBe(TransactionStatus.FAILED); // charge.failed
       expect(updated[2]?.status).toBe(TransactionStatus.SUCCESSFUL); // charge.success
     });
   });
@@ -270,7 +298,11 @@ describe('Paystack Integration Tests', () => {
         currency: 'NGN',
       });
 
-      const result = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result.success).toBe(true);
 
@@ -280,11 +312,17 @@ describe('Paystack Integration Tests', () => {
       });
 
       const metadata = webhookLogs[0].metadata;
-      expect(metadata.normalizedEvent.metadata.gateway_response).toBe('Successful');
+      expect(metadata.normalizedEvent.metadata.gateway_response).toBe(
+        'Successful',
+      );
       expect(metadata.normalizedEvent.metadata.channel).toBe('card');
       expect(metadata.normalizedEvent.metadata.authorization).toBeDefined();
-      expect(metadata.normalizedEvent.metadata.authorization.card_type).toBe('visa');
-      expect(metadata.normalizedEvent.metadata.authorization.last4).toBe('4081');
+      expect(metadata.normalizedEvent.metadata.authorization.card_type).toBe(
+        'visa',
+      );
+      expect(metadata.normalizedEvent.metadata.authorization.last4).toBe(
+        '4081',
+      );
     });
 
     it('should handle Paystack transfer webhooks', async () => {
@@ -298,7 +336,11 @@ describe('Paystack Integration Tests', () => {
         TEST_SECRET,
       );
 
-      const result = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result.success).toBe(true);
       expect(result.processingStatus).toBe(ProcessingStatus.UNMATCHED); // No matching transaction
@@ -331,8 +373,16 @@ describe('Paystack Integration Tests', () => {
       webhook.headers['x-paystack-signature'] = signature;
 
       // Process twice
-      const result1 = await processor.processWebhook('paystack', webhook.body, webhook.headers);
-      const result2 = await processor.processWebhook('paystack', webhook.body, webhook.headers);
+      const result1 = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
+      const result2 = await processor.processWebhook(
+        'paystack',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result1.success).toBe(true);
       expect(result1.processingStatus).toBe(ProcessingStatus.UNMATCHED); // No transaction
@@ -346,7 +396,9 @@ describe('Paystack Integration Tests', () => {
       });
       expect(webhookLogs).toHaveLength(2);
 
-      const duplicate = webhookLogs.find(w => w.processingStatus === ProcessingStatus.DUPLICATE);
+      const duplicate = webhookLogs.find(
+        (w) => w.processingStatus === ProcessingStatus.DUPLICATE,
+      );
       expect(duplicate).toBeDefined();
     });
   });

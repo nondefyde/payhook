@@ -10,6 +10,8 @@ import {
   TransactionStatus,
   ProcessingStatus,
   NormalizedEventType,
+  AuditAction,
+  TriggerType,
 } from '../../src';
 
 describe('WebhookProcessor Integration Tests', () => {
@@ -36,6 +38,7 @@ describe('WebhookProcessor Integration Tests', () => {
       skipSignatureVerification: false,
       storeRawPayload: true,
       redactKeys: ['card_number', 'cvv'],
+      secrets: new Map([['mock', ['test_secret']]]), // Add secrets for mock provider
     };
 
     // Create processor
@@ -56,26 +59,49 @@ describe('WebhookProcessor Integration Tests', () => {
         currency: 'NGN',
       });
 
+      // Move transaction to PROCESSING state (as would happen when payment is initiated)
+      await storageAdapter.updateTransactionStatus(
+        transaction.id,
+        TransactionStatus.PROCESSING,
+        {
+          transactionId: transaction.id,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.PROCESSING,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
+        },
+      );
+
       // Generate webhook for successful payment
       const webhook = providerAdapter.generateSignedWebhook(
         'payment.success',
         {
-          reference: transaction.applicationRef,
+          reference: 'prov_123',
           provider_ref: 'prov_123',
           amount: 10000,
           currency: 'NGN',
+          metadata: {
+            applicationRef: transaction.applicationRef,
+          },
         },
         'test_secret',
       );
 
       // Track dispatched events
       const dispatchedEvents: any[] = [];
-      eventDispatcher.on(NormalizedEventType.PAYMENT_SUCCEEDED, async (type, payload) => {
-        dispatchedEvents.push(payload);
-      });
+      eventDispatcher.on(
+        NormalizedEventType.PAYMENT_SUCCEEDED,
+        async (type, payload) => {
+          dispatchedEvents.push(payload);
+        },
+      );
 
       // Process webhook
-      const result = await processor.processWebhook('mock', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'mock',
+        webhook.body,
+        webhook.headers,
+      );
 
       // Verify processing result
       expect(result.success).toBe(true);
@@ -92,7 +118,9 @@ describe('WebhookProcessor Integration Tests', () => {
       expect(webhookLogs[0].processingStatus).toBe(ProcessingStatus.PROCESSED);
 
       // Verify transaction status was updated
-      const updatedTransaction = await storageAdapter.findTransaction({ id: transaction.id });
+      const updatedTransaction = await storageAdapter.findTransaction({
+        id: transaction.id,
+      });
       expect(updatedTransaction?.status).toBe(TransactionStatus.SUCCESSFUL);
       expect(updatedTransaction?.providerRef).toBe('prov_123');
 
@@ -101,11 +129,13 @@ describe('WebhookProcessor Integration Tests', () => {
       expect(dispatchedEvents[0].transaction.id).toBe(transaction.id);
 
       // Verify audit trail
-      const auditLogs = await storageAdapter.getAuditLogs({ transactionId: transaction.id });
+      const auditLogs = await storageAdapter.getAuditLogs(transaction.id);
       expect(auditLogs.length).toBeGreaterThan(0);
-      const stateTransition = auditLogs.find(log => log.action === 'WEBHOOK_STATE_TRANSITION');
-      expect(stateTransition?.stateBefore).toBe(TransactionStatus.PENDING);
-      expect(stateTransition?.stateAfter).toBe(TransactionStatus.SUCCESSFUL);
+      const stateTransition = auditLogs.find(
+        (log) => log.triggerType === TriggerType.WEBHOOK,
+      );
+      expect(stateTransition?.fromStatus).toBe(TransactionStatus.PROCESSING);
+      expect(stateTransition?.toStatus).toBe(TransactionStatus.SUCCESSFUL);
     });
 
     it('should handle duplicate webhooks correctly', async () => {
@@ -117,17 +147,76 @@ describe('WebhookProcessor Integration Tests', () => {
         currency: 'USD',
       });
 
-      // Generate idempotency scenario
-      const scenarios = WebhookScenarios.idempotency({
-        applicationRef: transaction.applicationRef,
-        providerRef: 'prov_456',
-      });
+      // Move to PROCESSING state
+      await storageAdapter.updateTransactionStatus(
+        transaction.id,
+        TransactionStatus.PROCESSING,
+        {
+          transactionId: transaction.id,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.PROCESSING,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
+        },
+      );
+
+      // Generate webhook payload with fixed event ID for duplication testing
+      const webhookData = {
+        id: 'evt_duplicate_test_123', // Fixed event ID for both webhooks
+        event: 'payment.success',
+        created_at: new Date().toISOString(),
+        data: {
+          reference: 'prov_456',
+          provider_ref: 'prov_456',
+          amount: 5000,
+          currency: 'USD',
+          status: 'success',
+          metadata: {
+            applicationRef: transaction.applicationRef,
+          },
+        },
+      };
+
+      // Create signed webhook bodies
+      const body1 = Buffer.from(JSON.stringify(webhookData));
+      const signature1 = require('crypto')
+        .createHmac('sha256', 'test_secret')
+        .update(body1)
+        .digest('hex');
+
+      const webhook1 = {
+        body: body1,
+        headers: {
+          'content-type': 'application/json',
+          'x-mock-signature': signature1,
+          'x-mock-event': 'payment.success',
+          'x-mock-timestamp': new Date().toISOString(),
+        },
+      };
+
+      // Create duplicate with same event ID but different timestamp
+      const webhookData2 = { ...webhookData, created_at: new Date(Date.now() + 1000).toISOString() };
+      const body2 = Buffer.from(JSON.stringify(webhookData2));
+      const signature2 = require('crypto')
+        .createHmac('sha256', 'test_secret')
+        .update(body2)
+        .digest('hex');
+
+      const webhook2 = {
+        body: body2,
+        headers: {
+          'content-type': 'application/json',
+          'x-mock-signature': signature2,
+          'x-mock-event': 'payment.success',
+          'x-mock-timestamp': new Date().toISOString(),
+        },
+      };
 
       // Process original webhook
       const result1 = await processor.processWebhook(
         'mock',
-        scenarios.original.body,
-        scenarios.original.headers,
+        webhook1.body,
+        webhook1.headers,
       );
       expect(result1.success).toBe(true);
       expect(result1.processingStatus).toBe(ProcessingStatus.PROCESSED);
@@ -135,14 +224,16 @@ describe('WebhookProcessor Integration Tests', () => {
       // Process duplicate webhook
       const result2 = await processor.processWebhook(
         'mock',
-        scenarios.duplicate.body,
-        scenarios.duplicate.headers,
+        webhook2.body,
+        webhook2.headers,
       );
       expect(result2.success).toBe(true);
       expect(result2.processingStatus).toBe(ProcessingStatus.DUPLICATE);
 
       // Verify only one state transition occurred
-      const updatedTransaction = await storageAdapter.findTransaction({ id: transaction.id });
+      const updatedTransaction = await storageAdapter.findTransaction({
+        id: transaction.id,
+      });
       expect(updatedTransaction?.status).toBe(TransactionStatus.SUCCESSFUL);
 
       // Verify both webhooks were logged
@@ -151,8 +242,12 @@ describe('WebhookProcessor Integration Tests', () => {
       });
       expect(webhookLogs).toHaveLength(2);
 
-      const processed = webhookLogs.find(w => w.processingStatus === ProcessingStatus.PROCESSED);
-      const duplicate = webhookLogs.find(w => w.processingStatus === ProcessingStatus.DUPLICATE);
+      const processed = webhookLogs.find(
+        (w) => w.processingStatus === ProcessingStatus.PROCESSED,
+      );
+      const duplicate = webhookLogs.find(
+        (w) => w.processingStatus === ProcessingStatus.DUPLICATE,
+      );
       expect(processed).toBeDefined();
       expect(duplicate).toBeDefined();
     });
@@ -180,18 +275,19 @@ describe('WebhookProcessor Integration Tests', () => {
 
     it('should handle unmatched webhooks', async () => {
       // Generate webhook for non-existent transaction
-      const webhook = providerAdapter.generateSignedWebhook(
-        'payment.success',
-        {
-          reference: 'non_existent_ref',
-          provider_ref: 'prov_789',
-          amount: 20000,
-          currency: 'EUR',
-        },
-      );
+      const webhook = providerAdapter.generateSignedWebhook('payment.success', {
+        reference: 'non_existent_ref',
+        provider_ref: 'prov_789',
+        amount: 20000,
+        currency: 'EUR',
+      });
 
       // Process webhook
-      const result = await processor.processWebhook('mock', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'mock',
+        webhook.body,
+        webhook.headers,
+      );
 
       expect(result.success).toBe(true); // Processing succeeded, but webhook was unmatched
       expect(result.processingStatus).toBe(ProcessingStatus.UNMATCHED);
@@ -219,38 +315,47 @@ describe('WebhookProcessor Integration Tests', () => {
         TransactionStatus.FAILED,
         {
           transactionId: transaction.id,
-          action: 'MANUAL_TRANSITION',
-          performedBy: 'test',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PENDING,
-          stateAfter: TransactionStatus.FAILED,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.FAILED,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
         },
       );
 
       // Try to process a success webhook (should be rejected)
-      const webhook = providerAdapter.generateSignedWebhook(
-        'payment.success',
-        {
-          reference: transaction.applicationRef,
-          provider_ref: 'prov_fail',
-          amount: 1000,
-          currency: 'GBP',
+      const webhook = providerAdapter.generateSignedWebhook('payment.success', {
+        reference: 'prov_fail',
+        provider_ref: 'prov_fail',
+        amount: 1000,
+        currency: 'GBP',
+        metadata: {
+          applicationRef: transaction.applicationRef,
         },
+      });
+
+      const result = await processor.processWebhook(
+        'mock',
+        webhook.body,
+        webhook.headers,
       );
 
-      const result = await processor.processWebhook('mock', webhook.body, webhook.headers);
-
       expect(result.success).toBe(true); // Processing succeeded
-      expect(result.processingStatus).toBe(ProcessingStatus.TRANSITION_REJECTED);
+      expect(result.processingStatus).toBe(
+        ProcessingStatus.TRANSITION_REJECTED,
+      );
 
       // Verify transaction status didn't change
-      const unchangedTransaction = await storageAdapter.findTransaction({ id: transaction.id });
+      const unchangedTransaction = await storageAdapter.findTransaction({
+        id: transaction.id,
+      });
       expect(unchangedTransaction?.status).toBe(TransactionStatus.FAILED);
 
       // Verify audit log shows rejection
-      const auditLogs = await storageAdapter.getAuditLogs({ transactionId: transaction.id });
-      const rejection = auditLogs.find(log =>
-        log.metadata?.attemptedTransition === `${TransactionStatus.FAILED} -> ${TransactionStatus.SUCCESSFUL}`
+      const auditLogs = await storageAdapter.getAuditLogs(transaction.id);
+      const rejection = auditLogs.find(
+        (log) =>
+          log.metadata?.attemptedTransition ===
+          `${TransactionStatus.FAILED} -> ${TransactionStatus.SUCCESSFUL}`,
       );
       expect(rejection).toBeDefined();
     });
@@ -265,17 +370,34 @@ describe('WebhookProcessor Integration Tests', () => {
         currency: 'NGN',
       });
 
-      const webhook = providerAdapter.generateSignedWebhook(
-        'payment.success',
+      // Move to PROCESSING state
+      await storageAdapter.updateTransactionStatus(
+        transaction.id,
+        TransactionStatus.PROCESSING,
         {
-          reference: transaction.applicationRef,
-          provider_ref: 'prov_pipeline',
-          amount: 15000,
-          currency: 'NGN',
+          transactionId: transaction.id,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.PROCESSING,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
         },
       );
 
-      const result = await processor.processWebhook('mock', webhook.body, webhook.headers);
+      const webhook = providerAdapter.generateSignedWebhook('payment.success', {
+        reference: 'prov_pipeline',
+        provider_ref: 'prov_pipeline',
+        amount: 15000,
+        currency: 'NGN',
+        metadata: {
+          applicationRef: transaction.applicationRef,
+        },
+      });
+
+      const result = await processor.processWebhook(
+        'mock',
+        webhook.body,
+        webhook.headers,
+      );
 
       // Verify all stages were executed
       expect(result.metrics.signatureVerified).toBe(true);
@@ -298,41 +420,38 @@ describe('WebhookProcessor Integration Tests', () => {
   describe('Error Handling', () => {
     it('should handle normalization errors gracefully', async () => {
       // Generate webhook with malformed data
-      const webhook = providerAdapter.generateSignedWebhook(
-        'unknown.event',
-        {
-          malformed: true,
-          // Missing required fields
-        },
-      );
+      const webhook = providerAdapter.generateSignedWebhook('unknown.event', {
+        malformed: true,
+        // Missing required fields
+      });
 
-      const result = await processor.processWebhook('mock', webhook.body, webhook.headers);
+      const result = await processor.processWebhook(
+        'mock',
+        webhook.body,
+        webhook.headers,
+      );
 
       // Should still log the webhook but with error status
       expect(result.success).toBe(false);
-      expect(result.processingStatus).toBe(ProcessingStatus.NORMALIZATION_FAILED);
+      expect(result.processingStatus).toBe(
+        ProcessingStatus.NORMALIZATION_FAILED,
+      );
     });
 
     it('should handle lifecycle hooks', async () => {
-      let beforeCalled = false;
-      let afterCalled = false;
-      let successCalled = false;
+      let webhookFateCalled = false;
+      let errorCalled = false;
 
       // Create processor with hooks
       const hookedConfig: PipelineConfig = {
         ...config,
         hooks: {
-          beforeProcessing: async (context) => {
-            beforeCalled = true;
-            expect(context.provider).toBe('mock');
+          onWebhookFate: async (result) => {
+            webhookFateCalled = true;
+            expect(result.provider).toBe('mock');
           },
-          afterProcessing: async (context) => {
-            afterCalled = true;
-            expect(context.webhookLog).toBeDefined();
-          },
-          onSuccess: async (result) => {
-            successCalled = true;
-            expect(result.success).toBe(true);
+          onError: async (error, context) => {
+            errorCalled = true;
           },
         },
       };
@@ -340,11 +459,14 @@ describe('WebhookProcessor Integration Tests', () => {
       const hookedProcessor = new WebhookProcessor(hookedConfig);
 
       const webhook = MockWebhookFactory.paymentSuccessful();
-      await hookedProcessor.processWebhook('mock', webhook.body, webhook.headers);
+      await hookedProcessor.processWebhook(
+        'mock',
+        webhook.body,
+        webhook.headers,
+      );
 
-      expect(beforeCalled).toBe(true);
-      expect(afterCalled).toBe(true);
-      expect(successCalled).toBe(true);
+      expect(webhookFateCalled).toBe(true);
+      expect(errorCalled).toBe(false); // No error occurred
     });
   });
 
@@ -358,39 +480,65 @@ describe('WebhookProcessor Integration Tests', () => {
             provider: 'mock',
             amount: 1000 * (i + 1),
             currency: 'NGN',
-          })
-        )
+          }),
+        ),
+      );
+
+      // Move all transactions to PROCESSING state
+      await Promise.all(
+        transactions.map((txn) =>
+          storageAdapter.updateTransactionStatus(
+            txn.id,
+            TransactionStatus.PROCESSING,
+            {
+              transactionId: txn.id,
+              fromStatus: TransactionStatus.PENDING,
+              toStatus: TransactionStatus.PROCESSING,
+              triggerType: TriggerType.MANUAL,
+              actor: 'test',
+            },
+          ),
+        ),
       );
 
       // Generate webhooks for all transactions
-      const webhooks = transactions.map(txn =>
+      const webhooks = transactions.map((txn) =>
         providerAdapter.generateSignedWebhook('payment.success', {
-          reference: txn.applicationRef,
+          reference: `prov_batch_${txn.id}`,
           provider_ref: `prov_batch_${txn.id}`,
           amount: txn.money.amount,
           currency: txn.money.currency,
-        })
+          metadata: {
+            applicationRef: txn.applicationRef,
+          },
+        }),
       );
 
       // Process all webhooks concurrently
       const results = await Promise.all(
-        webhooks.map(webhook =>
-          processor.processWebhook('mock', webhook.body, webhook.headers)
-        )
+        webhooks.map((webhook) =>
+          processor.processWebhook('mock', webhook.body, webhook.headers),
+        ),
       );
 
       // Verify all succeeded
-      expect(results.every(r => r.success)).toBe(true);
-      expect(results.every(r => r.processingStatus === ProcessingStatus.PROCESSED)).toBe(true);
+      expect(results.every((r) => r.success)).toBe(true);
+      expect(
+        results.every((r) => r.processingStatus === ProcessingStatus.PROCESSED),
+      ).toBe(true);
 
       // Verify all transactions were updated
       const updatedTransactions = await Promise.all(
-        transactions.map(txn =>
-          storageAdapter.findTransaction({ id: txn.id })
-        )
+        transactions.map((txn) =>
+          storageAdapter.findTransaction({ id: txn.id }),
+        ),
       );
 
-      expect(updatedTransactions.every(t => t?.status === TransactionStatus.SUCCESSFUL)).toBe(true);
+      expect(
+        updatedTransactions.every(
+          (t) => t?.status === TransactionStatus.SUCCESSFUL,
+        ),
+      ).toBe(true);
     });
   });
 });

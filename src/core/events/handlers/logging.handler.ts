@@ -1,4 +1,4 @@
-import { EventHandler } from '../../interfaces';
+import { SimpleEventHandler } from '../../interfaces';
 
 /**
  * Logging event handler
@@ -16,14 +16,17 @@ export class LoggingEventHandler {
   /**
    * Create the event handler function
    */
-  getHandler(): EventHandler {
+  getHandler(): SimpleEventHandler {
     return async (eventType: string, payload: any) => {
       try {
         const logData = this.prepareLogData(eventType, payload);
 
         this.logger.info(`[PayHook Event] ${eventType}`, logData);
       } catch (error) {
-        this.logger.error(`[PayHook Event Error] Failed to log event ${eventType}`, error);
+        this.logger.error(
+          `[PayHook Event Error] Failed to log event ${eventType}`,
+          error,
+        );
       }
     };
   }

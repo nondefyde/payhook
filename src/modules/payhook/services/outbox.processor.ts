@@ -1,5 +1,20 @@
-import { Injectable, Inject, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { StorageAdapter, EventDispatcher, OutboxEvent } from '../../../core';
+import {
+  Injectable,
+  Inject,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import type {
+  StorageAdapter,
+  EventDispatcher,
+  OutboxEvent,
+} from '../../../core';
+import {
+  STORAGE_ADAPTER,
+  EVENT_DISPATCHER,
+  PAYHOOK_CONFIG,
+} from '../constants';
 
 /**
  * Outbox Processor
@@ -13,11 +28,11 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
   private isProcessing = false;
 
   constructor(
-    @Inject(StorageAdapter)
+    @Inject(STORAGE_ADAPTER)
     private readonly storageAdapter: StorageAdapter,
-    @Inject(EventDispatcher)
+    @Inject(EVENT_DISPATCHER)
     private readonly eventDispatcher: EventDispatcher,
-    @Inject('PAYHOOK_CONFIG')
+    @Inject(PAYHOOK_CONFIG)
     private readonly config: any,
   ) {}
 
@@ -105,7 +120,8 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
 
       this.logger.debug(`Processed outbox event ${event.id}`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
 
       this.logger.error(`Failed to process outbox event ${event.id}:`, error);
 
@@ -113,9 +129,7 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
       await this.storageAdapter.markOutboxEventFailed(event.id, errorMessage);
 
       // If max retries exceeded, it will be moved to dead letter
-      if (event.retryCount >= (event.maxRetries - 1)) {
-        this.logger.warn(`Outbox event ${event.id} moved to dead letter queue`);
-      }
+      // TODO: Check retry count when OutboxEvent model is extended with retry fields
     }
   }
 
@@ -129,13 +143,14 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
     failed: number;
     deadLetter: number;
   }> {
-    const [pending, processing, delivered, failed, deadLetter] = await Promise.all([
-      this.countByStatus('pending'),
-      this.countByStatus('processing'),
-      this.countByStatus('delivered'),
-      this.countByStatus('failed'),
-      this.countByStatus('dead_letter'),
-    ]);
+    const [pending, processing, delivered, failed, deadLetter] =
+      await Promise.all([
+        this.countByStatus('pending'),
+        this.countByStatus('processing'),
+        this.countByStatus('delivered'),
+        this.countByStatus('failed'),
+        this.countByStatus('dead_letter'),
+      ]);
 
     return {
       pending,

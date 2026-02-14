@@ -7,7 +7,13 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { AuditAction, TransactionStatus } from '../../../../core';
+import {
+  TransactionStatus,
+  TriggerType,
+  ReconciliationResult,
+  VerificationMethod,
+  AuditAction,
+} from '../../../../core';
 import { TransactionEntity } from './transaction.entity';
 
 /**
@@ -15,8 +21,8 @@ import { TransactionEntity } from './transaction.entity';
  */
 @Entity('audit_logs')
 @Index(['transactionId'])
-@Index(['action'])
-@Index(['performedAt'])
+@Index(['triggerType'])
+@Index(['createdAt'])
 export class AuditLogEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -26,15 +32,62 @@ export class AuditLogEntity {
 
   @Column({
     type: 'enum',
-    enum: AuditAction,
+    enum: TransactionStatus,
+    name: 'from_status',
+    nullable: true,
   })
-  action: AuditAction;
+  fromStatus: TransactionStatus | null;
 
-  @Column({ name: 'performed_by' })
-  performedBy: string;
+  @Column({
+    type: 'enum',
+    enum: TransactionStatus,
+    name: 'to_status',
+  })
+  toStatus: TransactionStatus;
 
-  @Column({ name: 'performed_at' })
-  performedAt: Date;
+  @Column({
+    type: 'enum',
+    enum: TriggerType,
+    name: 'trigger_type',
+  })
+  triggerType: TriggerType;
+
+  @Column({ name: 'webhook_log_id', nullable: true })
+  webhookLogId: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: ReconciliationResult,
+    name: 'reconciliation_result',
+    nullable: true,
+  })
+  reconciliationResult: ReconciliationResult | null;
+
+  @Column({
+    type: 'enum',
+    enum: VerificationMethod,
+    name: 'verification_method',
+    nullable: true,
+  })
+  verificationMethod: VerificationMethod | null;
+
+  @Column({ type: 'jsonb', default: {} })
+  metadata: Record<string, any>;
+
+  @Column({ nullable: true })
+  actor: string | null;
+
+  @Column({ nullable: true })
+  reason: string | null;
+
+  @Column({ nullable: true })
+  action: AuditAction | null;
+
+  @Column({ nullable: true, name: 'performed_by' })
+  performedBy: string | null;
+
+  @Column({ nullable: true, name: 'performed_at' })
+  performedAt: Date | null;
 
   @Column({
     type: 'enum',
@@ -51,9 +104,6 @@ export class AuditLogEntity {
     nullable: true,
   })
   stateAfter: TransactionStatus | null;
-
-  @Column({ type: 'jsonb', default: {} })
-  metadata: Record<string, any>;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

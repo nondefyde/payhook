@@ -1,4 +1,4 @@
-import { EventHandler } from '../../interfaces';
+import { SimpleEventHandler } from '../../interfaces';
 import { StorageAdapter, ProcessingStatus } from '../../../core';
 
 /**
@@ -6,14 +6,17 @@ import { StorageAdapter, ProcessingStatus } from '../../../core';
  * Stores events for potential replay/retry scenarios
  */
 export class ReplayEventHandler {
-  private replayQueue: Map<string, {
-    eventType: string;
-    payload: any;
-    timestamp: Date;
-    attempts: number;
-    lastAttempt?: Date;
-    error?: string;
-  }> = new Map();
+  private replayQueue: Map<
+    string,
+    {
+      eventType: string;
+      payload: any;
+      timestamp: Date;
+      attempts: number;
+      lastAttempt?: Date;
+      error?: string;
+    }
+  > = new Map();
 
   constructor(
     private readonly storageAdapter: StorageAdapter,
@@ -24,7 +27,7 @@ export class ReplayEventHandler {
   /**
    * Create the event handler function
    */
-  getHandler(): EventHandler {
+  getHandler(): SimpleEventHandler {
     return async (eventType: string, payload: any) => {
       try {
         // Only queue failed or unmatched events for replay
@@ -44,7 +47,10 @@ export class ReplayEventHandler {
           this.scheduleReplay(replayId);
         }
       } catch (error) {
-        console.error('[ReplayEventHandler] Failed to queue event for replay:', error);
+        console.error(
+          '[ReplayEventHandler] Failed to queue event for replay:',
+          error,
+        );
       }
     };
   }
@@ -112,21 +118,26 @@ export class ReplayEventHandler {
 
         if (webhookLog.length > 0 && webhookLog[0].transactionId) {
           // Transaction found! Remove from replay queue
-          console.info(`[ReplayEventHandler] Transaction found for ${replayId}, removing from replay queue`);
+          console.info(
+            `[ReplayEventHandler] Transaction found for ${replayId}, removing from replay queue`,
+          );
           this.replayQueue.delete(replayId);
           return;
         }
       }
 
       // Still no transaction, schedule another retry with exponential backoff
-      const nextDelay = this.retryDelayMs * Math.pow(2, replayItem.attempts - 1);
+      const nextDelay =
+        this.retryDelayMs * Math.pow(2, replayItem.attempts - 1);
       setTimeout(async () => {
         await this.attemptReplay(replayId);
       }, nextDelay);
-
     } catch (error) {
       replayItem.error = error instanceof Error ? error.message : String(error);
-      console.error(`[ReplayEventHandler] Replay attempt failed for ${replayId}:`, error);
+      console.error(
+        `[ReplayEventHandler] Replay attempt failed for ${replayId}:`,
+        error,
+      );
 
       // Schedule another retry
       if (replayItem.attempts < this.maxRetries) {
@@ -149,7 +160,9 @@ export class ReplayEventHandler {
       return;
     }
 
-    console.error(`[ReplayEventHandler] Moving ${replayId} to dead letter queue after ${replayItem.attempts} attempts`);
+    console.error(
+      `[ReplayEventHandler] Moving ${replayId} to dead letter queue after ${replayItem.attempts} attempts`,
+    );
 
     // In a real implementation, this would persist to a dead letter storage
     // For now, we just log and remove from memory
@@ -193,9 +206,13 @@ export class ReplayEventHandler {
   /**
    * Manually trigger replay for a specific webhook
    */
-  async replayWebhook(webhookLogId: string): Promise<{ success: boolean; error?: string }> {
+  async replayWebhook(
+    webhookLogId: string,
+  ): Promise<{ success: boolean; error?: string }> {
     try {
-      const webhookLogs = await this.storageAdapter.findWebhookLogs({ id: webhookLogId });
+      const webhookLogs = await this.storageAdapter.findWebhookLogs({
+        id: webhookLogId,
+      });
       if (webhookLogs.length === 0) {
         return { success: false, error: 'Webhook log not found' };
       }

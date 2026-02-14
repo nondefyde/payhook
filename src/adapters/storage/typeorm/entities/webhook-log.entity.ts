@@ -50,6 +50,9 @@ export class WebhookLogEntity {
   @Column({ name: 'processing_duration_ms', nullable: true })
   processingDurationMs: number;
 
+  @Column({ type: 'text', nullable: true, name: 'error_message' })
+  errorMessage: string | null;
+
   @Column({ name: 'received_at' })
   receivedAt: Date;
 

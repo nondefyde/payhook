@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Request } from 'express';
 
 /**
@@ -17,7 +23,10 @@ import { Request } from 'express';
  */
 @Injectable()
 export class PayHookRateLimitGuard implements CanActivate {
-  private readonly requestCounts = new Map<string, { count: number; resetAt: number }>();
+  private readonly requestCounts = new Map<
+    string,
+    { count: number; resetAt: number }
+  >();
   private readonly windowMs: number;
   private readonly maxRequests: number;
   private readonly keyGenerator: (req: Request) => string;
@@ -29,11 +38,15 @@ export class PayHookRateLimitGuard implements CanActivate {
   }) {
     this.windowMs = config?.windowMs || 60000; // 1 minute default
     this.maxRequests = config?.maxRequests || 100; // 100 requests per window default
-    this.keyGenerator = config?.keyGenerator || ((req) => {
-      // Default: Use IP address as key
-      const forwarded = req.headers['x-forwarded-for'] as string;
-      return forwarded?.split(',')[0] || req.connection.remoteAddress || 'unknown';
-    });
+    this.keyGenerator =
+      config?.keyGenerator ||
+      ((req) => {
+        // Default: Use IP address as key
+        const forwarded = req.headers['x-forwarded-for'] as string;
+        return (
+          forwarded?.split(',')[0] || req.connection.remoteAddress || 'unknown'
+        );
+      });
 
     // Clean up expired entries periodically
     setInterval(() => this.cleanup(), this.windowMs);
@@ -66,12 +79,15 @@ export class PayHookRateLimitGuard implements CanActivate {
       this.setRateLimitHeaders(request, entry);
 
       const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
-      throw new HttpException({
-        statusCode: HttpStatus.TOO_MANY_REQUESTS,
-        message: `Rate limit exceeded. Please retry after ${retryAfter} seconds.`,
-        error: 'Too Many Requests',
-        retryAfter,
-      }, HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: `Rate limit exceeded. Please retry after ${retryAfter} seconds.`,
+          error: 'Too Many Requests',
+          retryAfter,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     // Increment counter
@@ -85,7 +101,10 @@ export class PayHookRateLimitGuard implements CanActivate {
   /**
    * Set rate limit headers on response
    */
-  private setRateLimitHeaders(request: any, entry: { count: number; resetAt: number }): void {
+  private setRateLimitHeaders(
+    request: any,
+    entry: { count: number; resetAt: number },
+  ): void {
     const remaining = Math.max(0, this.maxRequests - entry.count);
     const resetAt = new Date(entry.resetAt);
 
@@ -123,7 +142,9 @@ export class PayHookRateLimitGuard implements CanActivate {
   /**
    * Get current rate limit status for a key
    */
-  getStatus(key: string): { count: number; remaining: number; resetAt: Date } | null {
+  getStatus(
+    key: string,
+  ): { count: number; remaining: number; resetAt: Date } | null {
     const entry = this.requestCounts.get(key);
     if (!entry) {
       return null;
@@ -133,6 +154,19 @@ export class PayHookRateLimitGuard implements CanActivate {
       count: entry.count,
       remaining: Math.max(0, this.maxRequests - entry.count),
       resetAt: new Date(entry.resetAt),
+    };
+  }
+
+  /**
+   * Get current configuration
+   */
+  getConfig(): {
+    windowMs: number;
+    maxRequests: number;
+  } {
+    return {
+      windowMs: this.windowMs,
+      maxRequests: this.maxRequests,
     };
   }
 }

@@ -10,11 +10,13 @@ export const ApiWebhookEndpoint = (provider?: string) => {
       summary: provider
         ? `Receive webhook from ${provider} provider`
         : 'Receive webhook from payment provider',
-      description: 'Processes incoming payment provider webhooks, validates signatures, and updates transaction states',
+      description:
+        'Processes incoming payment provider webhooks, validates signatures, and updates transaction states',
     }),
     ApiParam({
       name: 'provider',
-      description: 'Payment provider name (e.g., paystack, stripe, flutterwave)',
+      description:
+        'Payment provider name (e.g., paystack, stripe, flutterwave)',
       example: provider || 'paystack',
       required: true,
     }),
@@ -25,7 +27,10 @@ export const ApiWebhookEndpoint = (provider?: string) => {
         type: 'object',
         properties: {
           success: { type: 'boolean', example: true },
-          message: { type: 'string', example: 'Webhook processed successfully' },
+          message: {
+            type: 'string',
+            example: 'Webhook processed successfully',
+          },
           details: {
             type: 'object',
             properties: {
@@ -60,7 +65,8 @@ export const ApiCustomWebhookEndpoint = () => {
   return applyDecorators(
     ApiOperation({
       summary: 'Receive webhook with custom path',
-      description: 'Handles webhooks at custom paths for specific provider configurations',
+      description:
+        'Handles webhooks at custom paths for specific provider configurations',
     }),
     ApiParam({
       name: 'customPath',

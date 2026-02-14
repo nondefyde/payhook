@@ -65,8 +65,13 @@ export class DeduplicationStage implements PipelineStage {
 
       const existingWebhooks = await this.storageAdapter.findWebhookLogs(query);
 
-      if (existingWebhooks.length > 0) {
-        const existingWebhook = existingWebhooks[0];
+      // Filter out the current webhook (which was just persisted)
+      const duplicates = existingWebhooks.filter(
+        w => w.id !== context.webhookLog?.id
+      );
+
+      if (duplicates.length > 0) {
+        const existingWebhook = duplicates[0];
 
         // Mark current webhook as duplicate
         context.processingStatus = ProcessingStatus.DUPLICATE;
@@ -76,10 +81,7 @@ export class DeduplicationStage implements PipelineStage {
           await this.storageAdapter.updateWebhookLogStatus(
             context.webhookLog.id,
             ProcessingStatus.DUPLICATE,
-            {
-              duplicateOf: existingWebhook.id,
-              originalReceivedAt: existingWebhook.receivedAt,
-            },
+            `Duplicate of ${existingWebhook.id} received at ${existingWebhook.receivedAt.toISOString()}`,
           );
         }
 
@@ -113,7 +115,8 @@ export class DeduplicationStage implements PipelineStage {
             isDuplicate: true,
             originalWebhookId: existingWebhook.id,
             originalReceivedAt: existingWebhook.receivedAt,
-            timeSinceOriginal: Date.now() - existingWebhook.receivedAt.getTime(),
+            timeSinceOriginal:
+              Date.now() - existingWebhook.receivedAt.getTime(),
             durationMs: Date.now() - startTime,
           },
         };

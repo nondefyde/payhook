@@ -105,7 +105,11 @@ export class Money {
   /**
    * Create from major currency units (e.g., dollars to cents)
    */
-  static fromMajorUnits(amount: number, currency: string, decimalPlaces = 2): Money {
+  static fromMajorUnits(
+    amount: number,
+    currency: string,
+    decimalPlaces = 2,
+  ): Money {
     const minorUnits = Math.round(amount * Math.pow(10, decimalPlaces));
     return new Money(minorUnits, currency);
   }

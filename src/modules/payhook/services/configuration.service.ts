@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { PayHookModuleConfig } from '../payhook.config';
+import type { PayHookModuleConfig } from '../payhook.config';
+import { PAYHOOK_CONFIG } from '../constants';
 
 /**
  * Configuration Service
@@ -9,7 +10,7 @@ import { PayHookModuleConfig } from '../payhook.config';
 @Injectable()
 export class ConfigurationService {
   constructor(
-    @Inject('PAYHOOK_CONFIG')
+    @Inject(PAYHOOK_CONFIG)
     private readonly config: PayHookModuleConfig,
   ) {}
 
@@ -31,7 +32,7 @@ export class ConfigurationService {
    * Get provider configuration
    */
   getProviderConfig(providerName: string) {
-    return this.config.providers.find(p => p.name === providerName);
+    return this.config.providers.find((p) => p.name === providerName);
   }
 
   /**

@@ -95,7 +95,8 @@ export class VerificationStage implements PipelineStage {
       };
     } catch (error) {
       context.signatureValid = false;
-      context.signatureError = error instanceof Error ? error.message : 'Unknown error';
+      context.signatureError =
+        error instanceof Error ? error.message : 'Unknown error';
       context.processingStatus = ProcessingStatus.SIGNATURE_FAILED;
 
       return {

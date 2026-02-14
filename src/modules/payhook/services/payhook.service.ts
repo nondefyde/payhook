@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import {
+import type {
   TransactionService,
   WebhookProcessor,
   StorageAdapter,
@@ -7,8 +7,14 @@ import {
   Transaction,
   CreateTransactionDto,
   ProcessingResult,
-  TransactionStatus,
 } from '../../../core';
+import { TransactionStatus } from '../../../core';
+import {
+  TRANSACTION_SERVICE,
+  WEBHOOK_PROCESSOR,
+  STORAGE_ADAPTER,
+  EVENT_DISPATCHER,
+} from '../constants';
 
 /**
  * PayHookService
@@ -20,13 +26,13 @@ export class PayHookService {
   private readonly logger = new Logger(PayHookService.name);
 
   constructor(
-    @Inject(TransactionService)
+    @Inject(TRANSACTION_SERVICE)
     private readonly transactionService: TransactionService,
-    @Inject(WebhookProcessor)
+    @Inject(WEBHOOK_PROCESSOR)
     private readonly webhookProcessor: WebhookProcessor,
-    @Inject(StorageAdapter)
+    @Inject(STORAGE_ADAPTER)
     private readonly storageAdapter: StorageAdapter,
-    @Inject(EventDispatcher)
+    @Inject(EVENT_DISPATCHER)
     private readonly eventDispatcher: EventDispatcher,
   ) {}
 
@@ -90,13 +96,16 @@ export class PayHookService {
     let failed = 0;
 
     // Find stale transactions
-    const staleTransactions = await this.transactionService.scanStaleTransactions({
-      staleAfterMinutes: 60,
-      limit,
-      provider,
-    });
+    const staleTransactions =
+      await this.transactionService.scanStaleTransactions({
+        staleAfterMinutes: 60,
+        limit,
+        provider,
+      });
 
-    this.logger.log(`Found ${staleTransactions.length} stale transactions to reconcile`);
+    this.logger.log(
+      `Found ${staleTransactions.length} stale transactions to reconcile`,
+    );
 
     // Reconcile each transaction
     for (const transaction of staleTransactions) {
@@ -166,11 +175,14 @@ export class PayHookService {
       duplicates: number;
       unmatched: number;
     };
-    providers: Record<string, {
-      total: number;
-      successful: number;
-      failed: number;
-    }>;
+    providers: Record<
+      string,
+      {
+        total: number;
+        successful: number;
+        failed: number;
+      }
+    >;
     health: {
       database: boolean;
       lastWebhook?: Date;
@@ -184,15 +196,20 @@ export class PayHookService {
     const webhookStats = await this.storageAdapter.getStatistics();
 
     // Calculate success rate
-    const totalProcessed = (transactionStats.byStatus[TransactionStatus.SUCCESSFUL] || 0) +
-                          (transactionStats.byStatus[TransactionStatus.FAILED] || 0);
-    const successRate = totalProcessed > 0
-      ? (transactionStats.byStatus[TransactionStatus.SUCCESSFUL] || 0) / totalProcessed
-      : 0;
+    const totalProcessed =
+      (transactionStats.byStatus[TransactionStatus.SUCCESSFUL] || 0) +
+      (transactionStats.byStatus[TransactionStatus.FAILED] || 0);
+    const successRate =
+      totalProcessed > 0
+        ? (transactionStats.byStatus[TransactionStatus.SUCCESSFUL] || 0) /
+          totalProcessed
+        : 0;
 
     // Get provider breakdown
     const providers: Record<string, any> = {};
-    for (const [provider, count] of Object.entries(transactionStats.byProvider)) {
+    for (const [provider, count] of Object.entries(
+      transactionStats.byProvider,
+    )) {
       providers[provider] = {
         total: count,
         successful: 0, // Would need more detailed stats
@@ -210,8 +227,8 @@ export class PayHookService {
         recentSuccessRate: successRate,
       },
       webhooks: {
-        total: webhookStats.totalWebhooks,
-        processed: webhookStats.totalWebhooks, // Would need more detail
+        total: webhookStats.webhookLogCount,
+        processed: webhookStats.webhookLogCount, // Would need more detail
         failed: 0, // Would need to query by status
         duplicates: 0,
         unmatched: 0,
@@ -250,19 +267,22 @@ export class PayHookService {
     replayed: number;
     failed: number;
   }> {
-    const webhooks = await this.transactionService.getTransactionWebhooks(transactionId);
+    const webhooks =
+      await this.transactionService.getTransactionWebhooks(transactionId);
 
     let filtered = webhooks;
 
     // Apply filters
     if (options?.fromDate) {
-      filtered = filtered.filter(w => w.receivedAt >= options.fromDate!);
+      filtered = filtered.filter((w) => w.receivedAt >= options.fromDate!);
     }
     if (options?.toDate) {
-      filtered = filtered.filter(w => w.receivedAt <= options.toDate!);
+      filtered = filtered.filter((w) => w.receivedAt <= options.toDate!);
     }
     if (options?.eventTypes && options.eventTypes.length > 0) {
-      filtered = filtered.filter(w => options.eventTypes!.includes(w.eventType));
+      filtered = filtered.filter((w) =>
+        options.eventTypes!.includes(w.eventType),
+      );
     }
 
     let replayed = 0;
@@ -271,16 +291,21 @@ export class PayHookService {
     for (const webhook of filtered) {
       try {
         if (webhook.rawPayload) {
+          // Convert rawPayload to Buffer for re-processing
+          const rawBody = Buffer.from(JSON.stringify(webhook.rawPayload));
+
           // Re-process the webhook
           await this.webhookProcessor.processWebhook(
             webhook.provider,
-            webhook.rawPayload,
+            rawBody,
             webhook.headers,
           );
           replayed++;
         } else {
           failed++;
-          this.logger.warn(`Cannot replay webhook ${webhook.id}: no raw payload stored`);
+          this.logger.warn(
+            `Cannot replay webhook ${webhook.id}: no raw payload stored`,
+          );
         }
       } catch (error) {
         failed++;

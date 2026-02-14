@@ -8,13 +8,15 @@ export class PaystackWebhookFactory {
   /**
    * Generate a charge.success webhook
    */
-  static chargeSuccess(options: {
-    reference?: string;
-    amount?: number;
-    currency?: string;
-    orderId?: string;
-    email?: string;
-  } = {}): {
+  static chargeSuccess(
+    options: {
+      reference?: string;
+      amount?: number;
+      currency?: string;
+      orderId?: string;
+      email?: string;
+    } = {},
+  ): {
     body: Buffer;
     headers: Record<string, string>;
     payload: any;
@@ -88,11 +90,13 @@ export class PaystackWebhookFactory {
   /**
    * Generate a charge.failed webhook
    */
-  static chargeFailed(options: {
-    reference?: string;
-    amount?: number;
-    reason?: string;
-  } = {}): {
+  static chargeFailed(
+    options: {
+      reference?: string;
+      amount?: number;
+      reason?: string;
+    } = {},
+  ): {
     body: Buffer;
     headers: Record<string, string>;
     payload: any;
@@ -133,11 +137,13 @@ export class PaystackWebhookFactory {
   /**
    * Generate a refund.processed webhook
    */
-  static refundProcessed(options: {
-    reference?: string;
-    transactionReference?: string;
-    amount?: number;
-  } = {}): {
+  static refundProcessed(
+    options: {
+      reference?: string;
+      transactionReference?: string;
+      amount?: number;
+    } = {},
+  ): {
     body: Buffer;
     headers: Record<string, string>;
     payload: any;
@@ -178,11 +184,13 @@ export class PaystackWebhookFactory {
   /**
    * Generate a transfer.success webhook
    */
-  static transferSuccess(options: {
-    reference?: string;
-    amount?: number;
-    recipient?: string;
-  } = {}): {
+  static transferSuccess(
+    options: {
+      reference?: string;
+      amount?: number;
+      recipient?: string;
+    } = {},
+  ): {
     body: Buffer;
     headers: Record<string, string>;
     payload: any;
@@ -224,11 +232,13 @@ export class PaystackWebhookFactory {
   /**
    * Generate a subscription.create webhook
    */
-  static subscriptionCreate(options: {
-    subscriptionCode?: string;
-    amount?: number;
-    interval?: 'hourly' | 'daily' | 'weekly' | 'monthly' | 'annually';
-  } = {}): {
+  static subscriptionCreate(
+    options: {
+      subscriptionCode?: string;
+      amount?: number;
+      interval?: 'hourly' | 'daily' | 'weekly' | 'monthly' | 'annually';
+    } = {},
+  ): {
     body: Buffer;
     headers: Record<string, string>;
     payload: any;
@@ -239,10 +249,14 @@ export class PaystackWebhookFactory {
         id: Math.floor(Math.random() * 1000000),
         domain: 'test',
         status: 'active',
-        subscription_code: options.subscriptionCode || `SUB_${Math.random().toString(36).substring(7)}`,
+        subscription_code:
+          options.subscriptionCode ||
+          `SUB_${Math.random().toString(36).substring(7)}`,
         amount: options.amount || 10000,
         cron_expression: '0 0 * * *',
-        next_payment_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        next_payment_date: new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
         open_invoice: null,
         created_at: new Date().toISOString(),
         plan: {
@@ -278,21 +292,20 @@ export class PaystackWebhookFactory {
   /**
    * Sign a webhook payload with a secret
    */
-  static sign(
-    body: Buffer,
-    secret: string,
-  ): string {
-    return crypto
-      .createHmac('sha512', secret)
-      .update(body)
-      .digest('hex');
+  static sign(body: Buffer, secret: string): string {
+    return crypto.createHmac('sha512', secret).update(body).digest('hex');
   }
 
   /**
    * Generate a signed webhook
    */
   static generateSignedWebhook(
-    event: 'charge.success' | 'charge.failed' | 'refund.processed' | 'transfer.success' | 'subscription.create',
+    event:
+      | 'charge.success'
+      | 'charge.failed'
+      | 'refund.processed'
+      | 'transfer.success'
+      | 'subscription.create',
     options: any = {},
     secret: string = 'sk_test_xxxxxxxxxxxxx',
   ): {
@@ -333,23 +346,38 @@ export class PaystackWebhookFactory {
   /**
    * Generate batch of webhooks for testing
    */
-  static batch(count: number, secret?: string): Array<{
+  static batch(
+    count: number,
+    secret?: string,
+  ): Array<{
     body: Buffer;
     headers: Record<string, string>;
   }> {
-    const events: Array<'charge.success' | 'charge.failed' | 'refund.processed'> = [
-      'charge.success',
-      'charge.failed',
-      'refund.processed',
-    ];
+    const events: Array<
+      | 'charge.success'
+      | 'charge.failed'
+      | 'refund.processed'
+      | 'transfer.success'
+      | 'subscription.create'
+    > = ['charge.success', 'charge.failed', 'refund.processed'];
 
-    const webhooks = [];
+    const webhooks: Array<{
+      body: Buffer;
+      headers: Record<string, string>;
+    }> = [];
+
     for (let i = 0; i < count; i++) {
       const event = events[i % events.length];
-      webhooks.push(this.generateSignedWebhook(event, {
-        reference: `batch_ref_${i}`,
-        amount: (i + 1) * 1000,
-      }, secret));
+      webhooks.push(
+        this.generateSignedWebhook(
+          event,
+          {
+            reference: `batch_ref_${i}`,
+            amount: (i + 1) * 1000,
+          },
+          secret,
+        ),
+      );
     }
 
     return webhooks;

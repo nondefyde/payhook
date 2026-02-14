@@ -20,6 +20,8 @@ import {
   CreateDispatchLogDto,
   CreateOutboxEventDto,
   MarkAsProcessingDto,
+  WebhookQuery,
+  OutboxQuery,
 } from './common.types';
 
 /**
@@ -60,6 +62,27 @@ export interface StorageAdapter {
   findTransaction(query: TransactionQuery): Promise<Transaction | null>;
 
   /**
+   * Find multiple transactions by query
+   */
+  findTransactions(
+    query: TransactionQuery,
+    pagination?: Pagination,
+  ): Promise<Transaction[]>;
+
+  /**
+   * Count transactions matching query
+   */
+  countTransactions(query: TransactionQuery): Promise<number>;
+
+  /**
+   * Update transaction metadata
+   */
+  updateTransaction(
+    id: string,
+    updates: Partial<Transaction>,
+  ): Promise<Transaction>;
+
+  /**
    * List transactions with filtering and pagination
    */
   listTransactions(
@@ -80,6 +103,11 @@ export interface StorageAdapter {
    * Used to prevent concurrent modifications
    */
   lockTransactionForUpdate(id: string): Promise<Transaction | null>;
+
+  /**
+   * Link provider reference to transaction
+   */
+  linkProviderRef(transactionId: string, providerRef: string): Promise<void>;
 
   // ==================== Webhook Log Operations ====================
 
@@ -103,12 +131,37 @@ export interface StorageAdapter {
   ): Promise<WebhookLog | null>;
 
   /**
+   * Find webhook logs matching criteria
+   */
+  findWebhookLogs(
+    criteria: Partial<WebhookLog>,
+    pagination?: Pagination,
+  ): Promise<WebhookLog[]>;
+
+  /**
    * Update webhook log (for late matching)
    */
   updateWebhookLog(
     id: string,
     updates: Partial<WebhookLog>,
   ): Promise<WebhookLog>;
+
+  /**
+   * Update webhook log status
+   */
+  updateWebhookLogStatus(
+    id: string,
+    status: any,
+    errorMessage?: string,
+  ): Promise<WebhookLog>;
+
+  /**
+   * Link webhook to transaction
+   */
+  linkWebhookToTransaction(
+    webhookId: string,
+    transactionId: string,
+  ): Promise<void>;
 
   /**
    * List unmatched webhooks for review/matching
@@ -126,6 +179,11 @@ export interface StorageAdapter {
     pagination: Pagination,
   ): Promise<PaginatedResult<WebhookLog>>;
 
+  /**
+   * Count webhook logs matching criteria
+   */
+  countWebhookLogs(query: WebhookQuery): Promise<number>;
+
   // ==================== Audit Log Operations ====================
 
   /**
@@ -138,6 +196,11 @@ export interface StorageAdapter {
    * Get complete audit trail for a transaction
    */
   getAuditTrail(transactionId: string): Promise<AuditLog[]>;
+
+  /**
+   * Get audit logs for a transaction (alternative name)
+   */
+  getAuditLogs(transactionId: string): Promise<AuditLog[]>;
 
   /**
    * Get audit logs within date range
@@ -178,9 +241,7 @@ export interface StorageAdapter {
   /**
    * Get pending outbox events for processing
    */
-  listPendingOutboxEvents(
-    limit?: number,
-  ): Promise<OutboxEvent[]>;
+  listPendingOutboxEvents(limit?: number): Promise<OutboxEvent[]>;
 
   /**
    * Mark outbox event as processed
@@ -190,10 +251,7 @@ export interface StorageAdapter {
   /**
    * Mark outbox event as failed
    */
-  markOutboxEventFailed(
-    id: string,
-    errorMessage: string,
-  ): Promise<OutboxEvent>;
+  markOutboxEventFailed(id: string, errorMessage: string): Promise<OutboxEvent>;
 
   /**
    * Get stale outbox events (unprocessed for too long)
@@ -202,6 +260,11 @@ export interface StorageAdapter {
     olderThanMinutes: number,
     limit?: number,
   ): Promise<OutboxEvent[]>;
+
+  /**
+   * Get outbox events by query
+   */
+  getOutboxEvents(query: OutboxQuery): Promise<OutboxEvent[]>;
 
   // ==================== Retention & Cleanup ====================
 
@@ -242,9 +305,7 @@ export interface StorageAdapter {
    * Execute operations within a transaction
    * Automatically handles commit/rollback
    */
-  withTransaction<T>(
-    callback: (txn: any) => Promise<T>,
-  ): Promise<T>;
+  withTransaction<T>(callback: (txn: any) => Promise<T>): Promise<T>;
 
   // ==================== Health & Monitoring ====================
 

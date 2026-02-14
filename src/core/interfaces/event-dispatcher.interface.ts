@@ -25,6 +25,22 @@ export interface PaymentEvent {
 export type EventHandler = (event: PaymentEvent) => Promise<void> | void;
 
 /**
+ * Alternative event handler signature (simple)
+ */
+export type SimpleEventHandler = (
+  eventType: string,
+  payload: any,
+) => Promise<void> | void;
+
+/**
+ * Event subscription
+ */
+export interface EventSubscription {
+  id: string;
+  unsubscribe: () => void;
+}
+
+/**
  * Event handler registration
  */
 export interface EventHandlerRegistration {
@@ -99,32 +115,63 @@ export interface DispatchSummary {
  */
 export interface EventDispatcher {
   /**
-   * Register an event handler
+   * Register a handler for a specific event type
    */
-  registerHandler(registration: EventHandlerRegistration): void;
+  on(
+    eventType: NormalizedEventType | string,
+    handler: SimpleEventHandler,
+  ): EventSubscription;
+
+  /**
+   * Unregister a handler for a specific event type
+   */
+  off?(
+    eventType: NormalizedEventType | string,
+    handler: SimpleEventHandler,
+  ): void;
+
+  /**
+   * Register a handler for all event types
+   */
+  onAll?(handler: SimpleEventHandler): EventSubscription;
+
+  /**
+   * Simple dispatch method
+   */
+  dispatch(
+    eventType: NormalizedEventType | string,
+    payload: any,
+  ): Promise<void>;
+
+  /**
+   * Register an event handler (alternative method)
+   */
+  registerHandler?(registration: EventHandlerRegistration): void;
 
   /**
    * Unregister an event handler by name
    */
-  unregisterHandler(name: string): void;
+  unregisterHandler?(name: string): void;
 
   /**
    * Get all registered handlers
    */
-  getHandlers(): EventHandlerRegistration[];
+  getHandlers?(): EventHandlerRegistration[];
 
   /**
    * Get handlers for a specific event type
    */
-  getHandlersForEvent(eventType: NormalizedEventType): EventHandlerRegistration[];
+  getHandlersForEvent?(
+    eventType: NormalizedEventType,
+  ): EventHandlerRegistration[];
 
   /**
-   * Dispatch an event to all registered handlers
+   * Dispatch an event to all registered handlers (complex version)
    * @param event - The event to dispatch
    * @param options - Dispatch options
    * @returns Summary of dispatch results
    */
-  dispatch(
+  dispatchEvent?(
     event: PaymentEvent,
     options?: DispatchOptions,
   ): Promise<DispatchSummary>;
@@ -269,7 +316,10 @@ export interface DispatchLifecycleHooks {
   /**
    * Called before each handler execution
    */
-  beforeHandler?: (event: PaymentEvent, handlerName: string) => void | Promise<void>;
+  beforeHandler?: (
+    event: PaymentEvent,
+    handlerName: string,
+  ) => void | Promise<void>;
 
   /**
    * Called after each handler execution
@@ -279,10 +329,18 @@ export interface DispatchLifecycleHooks {
   /**
    * Called when a handler fails
    */
-  onHandlerError?: (error: Error, handlerName: string, event: PaymentEvent) => void | Promise<void>;
+  onHandlerError?: (
+    error: Error,
+    handlerName: string,
+    event: PaymentEvent,
+  ) => void | Promise<void>;
 
   /**
    * Called when a handler is skipped
    */
-  onHandlerSkipped?: (handlerName: string, reason: string, event: PaymentEvent) => void | Promise<void>;
+  onHandlerSkipped?: (
+    handlerName: string,
+    reason: string,
+    event: PaymentEvent,
+  ) => void | Promise<void>;
 }

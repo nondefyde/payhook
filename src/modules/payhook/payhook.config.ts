@@ -36,7 +36,12 @@ export interface PayHookModuleConfig {
     /**
      * Provider adapter instance or name
      */
-    adapter: PaymentProviderAdapter | 'mock' | 'paystack' | 'stripe' | 'flutterwave';
+    adapter:
+      | PaymentProviderAdapter
+      | 'mock'
+      | 'paystack'
+      | 'stripe'
+      | 'flutterwave';
 
     /**
      * Authentication keys configuration

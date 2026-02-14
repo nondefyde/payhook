@@ -22,3 +22,12 @@ export * from './services';
 
 // Event system
 export * from './events';
+
+// Adapters - Storage
+export { MockStorageAdapter } from '../adapters/storage/mock/mock-storage.adapter';
+export { TypeORMStorageAdapter } from '../adapters/storage/typeorm/typeorm-storage.adapter';
+export { createDataSource } from '../adapters/storage/typeorm/typeorm.config';
+
+// Adapters - Providers
+export { MockProviderAdapter } from '../adapters/providers/mock/mock-provider.adapter';
+export { PaystackProviderAdapter } from '../adapters/providers/paystack/paystack-provider.adapter';

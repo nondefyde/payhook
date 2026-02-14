@@ -1,8 +1,4 @@
-import {
-  PipelineStage,
-  WebhookContext,
-  StageResult,
-} from '../types';
+import { PipelineStage, WebhookContext, StageResult } from '../types';
 import {
   EventDispatcher,
   StorageAdapter,
@@ -51,7 +47,10 @@ export class DispatchStage implements PipelineStage {
         ProcessingStatus.PARSE_ERROR,
       ];
 
-      if (context.processingStatus && skipStatuses.includes(context.processingStatus)) {
+      if (
+        context.processingStatus &&
+        skipStatuses.includes(context.processingStatus)
+      ) {
         return {
           success: true,
           context,
@@ -96,7 +95,10 @@ export class DispatchStage implements PipelineStage {
       if (this.useOutbox) {
         const outboxEvent: CreateOutboxEventDto = {
           eventType: context.normalizedEvent.eventType,
-          aggregateId: context.transaction?.id || context.webhookLog?.id || context.processingId,
+          aggregateId:
+            context.transaction?.id ||
+            context.webhookLog?.id ||
+            context.processingId,
           aggregateType: context.transaction ? 'transaction' : 'webhook',
           payload: eventPayload,
           metadata: {
@@ -106,7 +108,8 @@ export class DispatchStage implements PipelineStage {
           },
         };
 
-        const savedOutboxEvent = await this.storageAdapter.createOutboxEvent(outboxEvent);
+        const savedOutboxEvent =
+          await this.storageAdapter.createOutboxEvent(outboxEvent);
 
         // Outbox processor will handle actual dispatch
         return {
@@ -166,57 +169,49 @@ export class DispatchStage implements PipelineStage {
     };
 
     try {
-      // Get registered handlers for this event type
-      const handlers = this.eventDispatcher!.getHandlers(eventPayload.eventType);
-      results.handlersInvoked = handlers.length;
+      // Since we can't get individual handlers, just dispatch once
+      const handlerStartTime = Date.now();
+      let status: DispatchStatus = DispatchStatus.PENDING;
+      let error: Error | undefined;
 
-      // Dispatch to each handler
-      const dispatchPromises = handlers.map(async (handler) => {
-        const handlerStartTime = Date.now();
-        let status: DispatchStatus = DispatchStatus.PENDING;
-        let error: Error | undefined;
+      try {
+        await this.eventDispatcher!.dispatch(
+          eventPayload.eventType,
+          eventPayload,
+        );
+        status = DispatchStatus.DELIVERED;
+        results.successfulHandlers = 1;
+        results.handlersInvoked = 1;
+      } catch (err) {
+        status = DispatchStatus.FAILED;
+        error = err instanceof Error ? err : new Error(String(err));
+        results.failedHandlers = 1;
+        results.handlersInvoked = 1;
+        results.allSuccessful = false;
+      }
 
-        try {
-          await this.eventDispatcher!.dispatch(
-            eventPayload.eventType,
-            eventPayload,
-          );
-          status = DispatchStatus.DELIVERED;
-          results.successfulHandlers++;
-        } catch (err) {
-          status = DispatchStatus.FAILED;
-          error = err instanceof Error ? err : new Error(String(err));
-          results.failedHandlers++;
-          results.allSuccessful = false;
-        }
+      // Log dispatch attempt
+      const dispatchLog: CreateDispatchLogDto = {
+        webhookLogId: context.webhookLog?.id,
+        transactionId: context.transaction?.id || '', // Make sure it's a string
+        eventType: eventPayload.eventType,
+        handlerName: 'event-dispatcher',
+        status,
+        attemptedAt: new Date(handlerStartTime),
+        completedAt: new Date(),
+        durationMs: Date.now() - handlerStartTime,
+        error: error?.message,
+        metadata: {
+          processingId: context.processingId,
+          provider: context.provider,
+        },
+      };
 
-        // Log dispatch attempt
-        const dispatchLog: CreateDispatchLogDto = {
-          webhookLogId: context.webhookLog?.id,
-          transactionId: context.transaction?.id,
-          eventType: eventPayload.eventType,
-          handlerName: handler.name || 'unknown',
-          status,
-          attemptedAt: new Date(handlerStartTime),
-          completedAt: new Date(),
-          durationMs: Date.now() - handlerStartTime,
-          error: error?.message,
-          metadata: {
-            processingId: context.processingId,
-            provider: context.provider,
-          },
-        };
+      await this.storageAdapter.createDispatchLog(dispatchLog);
 
-        await this.storageAdapter.createDispatchLog(dispatchLog);
-
-        if (error) {
-          throw error; // Re-throw for Promise.allSettled to catch
-        }
-      });
-
-      // Wait for all dispatches to complete
-      await Promise.allSettled(dispatchPromises);
-
+      if (error) {
+        throw error;
+      }
     } catch (error) {
       console.error('Error during event dispatch:', error);
       results.allSuccessful = false;

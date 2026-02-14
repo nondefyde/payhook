@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Request } from 'express';
 
 /**
@@ -19,10 +25,7 @@ export class PayHookBodySizeGuard implements CanActivate {
   private readonly maxBodySize: number;
   private readonly checkContentLength: boolean;
 
-  constructor(config?: {
-    maxBodySize?: number;
-    checkContentLength?: boolean;
-  }) {
+  constructor(config?: { maxBodySize?: number; checkContentLength?: boolean }) {
     this.maxBodySize = config?.maxBodySize || 1048576; // 1MB default
     this.checkContentLength = config?.checkContentLength !== false; // Default true
   }
@@ -36,13 +39,16 @@ export class PayHookBodySizeGuard implements CanActivate {
       if (contentLength) {
         const size = parseInt(contentLength, 10);
         if (!isNaN(size) && size > this.maxBodySize) {
-          throw new HttpException({
-            statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
-            message: `Payload too large. Maximum size is ${this.formatBytes(this.maxBodySize)}.`,
-            error: 'Payload Too Large',
-            maxSize: this.maxBodySize,
-            actualSize: size,
-          }, HttpStatus.PAYLOAD_TOO_LARGE);
+          throw new HttpException(
+            {
+              statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+              message: `Payload too large. Maximum size is ${this.formatBytes(this.maxBodySize)}.`,
+              error: 'Payload Too Large',
+              maxSize: this.maxBodySize,
+              actualSize: size,
+            },
+            HttpStatus.PAYLOAD_TOO_LARGE,
+          );
         }
       }
     }
@@ -66,13 +72,16 @@ export class PayHookBodySizeGuard implements CanActivate {
       }
 
       if (bodySize > this.maxBodySize) {
-        throw new HttpException({
-          statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
-          message: `Payload too large. Maximum size is ${this.formatBytes(this.maxBodySize)}.`,
-          error: 'Payload Too Large',
-          maxSize: this.maxBodySize,
-          actualSize: bodySize,
-        }, HttpStatus.PAYLOAD_TOO_LARGE);
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+            message: `Payload too large. Maximum size is ${this.formatBytes(this.maxBodySize)}.`,
+            error: 'Payload Too Large',
+            maxSize: this.maxBodySize,
+            actualSize: bodySize,
+          },
+          HttpStatus.PAYLOAD_TOO_LARGE,
+        );
       }
     }
 

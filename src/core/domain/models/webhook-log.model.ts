@@ -10,7 +10,7 @@ export class WebhookLog {
     public readonly provider: string,
     public readonly providerEventId: string,
     public readonly eventType: string,
-    public readonly rawPayload: Record<string, any>,
+    public rawPayload: Record<string, any>,
     public readonly signatureValid: boolean,
     public processingStatus: ProcessingStatus,
     public readonly receivedAt: Date = new Date(),
@@ -20,6 +20,19 @@ export class WebhookLog {
     public headers: Record<string, string> = {},
     public processingDurationMs: number | null = null,
   ) {}
+
+  /**
+   * Get metadata (for compatibility)
+   */
+  get metadata(): Record<string, any> {
+    return {
+      normalizedEvent: this.normalizedEvent
+        ? JSON.parse(this.normalizedEvent)
+        : null,
+      providerEventId: this.providerEventId,
+      eventType: this.eventType,
+    };
+  }
 
   /**
    * Check if webhook was successfully processed

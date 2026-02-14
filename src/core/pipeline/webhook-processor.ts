@@ -85,11 +85,6 @@ export class WebhookProcessor {
     };
 
     try {
-      // Pre-processing hook
-      if (this.hooks?.beforeProcessing) {
-        await this.hooks.beforeProcessing(context);
-      }
-
       // Execute pipeline with timeout
       const processingPromise = this.executePipeline(context, metrics);
       const timeoutPromise = this.createTimeout();
@@ -104,29 +99,32 @@ export class WebhookProcessor {
       context.processingDurationMs = Date.now() - startTime;
       metrics.totalDurationMs = context.processingDurationMs;
 
-      // Post-processing hook
-      if (this.hooks?.afterProcessing) {
-        await this.hooks.afterProcessing(context);
-      }
-
       // Build result
       const processingResult: ProcessingResult = {
         success: !context.error,
         webhookLogId: context.webhookLog?.id,
         transactionId: context.transaction?.id,
-        processingStatus: context.processingStatus || ProcessingStatus.PROCESSED,
+        processingStatus:
+          context.processingStatus || ProcessingStatus.PROCESSED,
         error: context.error,
         context,
         metrics,
       };
 
-      // Success hook
-      if (!context.error && this.hooks?.onSuccess) {
-        await this.hooks.onSuccess(processingResult);
+      // Call webhook fate hook after processing
+      if (this.hooks?.onWebhookFate) {
+        await this.hooks.onWebhookFate({
+          provider: context.provider,
+          processingStatus:
+            context.processingStatus || ProcessingStatus.PROCESSED,
+          eventType: context.metadata?.eventType || 'unknown',
+          latencyMs: context.processingDurationMs,
+          transactionId: context.transaction?.id,
+          error: context.error,
+        });
       }
 
       return processingResult;
-
     } catch (error) {
       // Handle pipeline error
       context.error = error instanceof Error ? error : new Error(String(error));
@@ -139,14 +137,21 @@ export class WebhookProcessor {
 
       // Error hook
       if (this.hooks?.onError) {
-        await this.hooks.onError(context.error, context);
+        await this.hooks.onError(context.error, {
+          operation: 'webhook-processing',
+          provider: context.provider,
+          transactionId: context.transaction?.id,
+          webhookLogId: context.webhookLog?.id,
+          metadata: context.metadata,
+        });
       }
 
       const errorResult: ProcessingResult = {
         success: false,
         webhookLogId: context.webhookLog?.id,
         transactionId: context.transaction?.id,
-        processingStatus: context.processingStatus || ProcessingStatus.PARSE_ERROR,
+        processingStatus:
+          context.processingStatus || ProcessingStatus.PARSE_ERROR,
         error: context.error,
         context,
         metrics,
@@ -198,7 +203,6 @@ export class WebhookProcessor {
         if (!result.success && result.error) {
           throw result.error;
         }
-
       } catch (error) {
         // Record stage failure
         metrics.stageDurations.set(stage.name, Date.now() - stageStartTime);
@@ -220,45 +224,53 @@ export class WebhookProcessor {
     const stages: PipelineStage[] = [];
 
     // Stage 2: Verification (can be skipped for testing)
-    stages.push(new VerificationStage(
-      this.config.providerAdapters,
-      this.secrets,
-      this.config.skipSignatureVerification ?? false,
-    ));
+    stages.push(
+      new VerificationStage(
+        this.config.providerAdapters,
+        this.secrets,
+        this.config.skipSignatureVerification ?? false,
+      ),
+    );
 
     // Stage 3: Normalization
-    stages.push(new NormalizationStage(
-      this.config.providerAdapters,
-    ));
+    stages.push(new NormalizationStage(this.config.providerAdapters));
 
     // Stage 4: Persist Claim
-    stages.push(new PersistClaimStage(
-      this.config.storageAdapter,
-      this.config.storeRawPayload ?? true,
-      this.config.redactKeys ?? [],
-    ));
+    stages.push(
+      new PersistClaimStage(
+        this.config.storageAdapter,
+        this.config.storeRawPayload ?? true,
+        this.config.redactKeys ?? [],
+      ),
+    );
 
     // Stage 5: Deduplication
-    stages.push(new DeduplicationStage(
-      this.config.storageAdapter,
-      false, // Never skip deduplication in production
-    ));
+    stages.push(
+      new DeduplicationStage(
+        this.config.storageAdapter,
+        false, // Never skip deduplication in production
+      ),
+    );
 
     // Stage 6: State Engine
     if (this.config.stateMachine) {
-      stages.push(new StateEngineStage(
-        this.config.storageAdapter,
-        this.config.stateMachine,
-        false, // Don't auto-create transactions by default
-      ));
+      stages.push(
+        new StateEngineStage(
+          this.config.storageAdapter,
+          this.config.stateMachine,
+          false, // Don't auto-create transactions by default
+        ),
+      );
     }
 
     // Stage 7: Dispatch
-    stages.push(new DispatchStage(
-      this.config.eventDispatcher,
-      this.config.storageAdapter,
-      false, // Outbox pattern disabled by default
-    ));
+    stages.push(
+      new DispatchStage(
+        this.config.eventDispatcher,
+        this.config.storageAdapter,
+        false, // Outbox pattern disabled by default
+      ),
+    );
 
     return stages;
   }
@@ -267,12 +279,16 @@ export class WebhookProcessor {
    * Extract secrets from configuration
    */
   private extractSecrets(): Map<string, string[]> {
+    // Use secrets from config if provided
+    if (this.config.secrets) {
+      return this.config.secrets;
+    }
+
+    // Otherwise, return empty map (will fail signature verification)
     const secrets = new Map<string, string[]>();
 
-    // Extract from provider adapters if they expose secrets
-    for (const [provider, adapter] of this.config.providerAdapters) {
-      // For now, secrets should be passed separately in config
-      // This is a placeholder for when we add secret management
+    // Initialize empty arrays for each provider
+    for (const [provider] of this.config.providerAdapters) {
       secrets.set(provider, []);
     }
 
@@ -282,7 +298,9 @@ export class WebhookProcessor {
   /**
    * Normalize headers to lowercase keys
    */
-  private normalizeHeaders(headers: Record<string, string>): Record<string, string> {
+  private normalizeHeaders(
+    headers: Record<string, string>,
+  ): Record<string, string> {
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers)) {
       normalized[key.toLowerCase()] = value;
@@ -293,7 +311,11 @@ export class WebhookProcessor {
   /**
    * Update metrics based on stage completion
    */
-  private updateMetrics(stageName: string, success: boolean, metrics: ProcessingMetrics): void {
+  private updateMetrics(
+    stageName: string,
+    success: boolean,
+    metrics: ProcessingMetrics,
+  ): void {
     if (!success) return;
 
     switch (stageName) {
@@ -337,7 +359,7 @@ export class WebhookProcessor {
     };
   } {
     return {
-      stages: this.stages.map(s => s.name),
+      stages: this.stages.map((s) => s.name),
       configuration: {
         skipVerification: this.config.skipSignatureVerification ?? false,
         storeRawPayload: this.config.storeRawPayload ?? true,

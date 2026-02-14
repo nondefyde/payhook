@@ -22,7 +22,8 @@ export const RequireProviderRefGuard: TransitionGuard = {
     ) {
       return {
         allowed: false,
-        reason: 'Provider reference is required when transitioning to processing',
+        reason:
+          'Provider reference is required when transitioning to processing',
       };
     }
     return { allowed: true };
@@ -162,7 +163,8 @@ export const RequireVerifiedWebhookGuard: TransitionGuard = {
       if (!signatureVerified) {
         return {
           allowed: false,
-          reason: 'Webhook signature must be verified for webhook-triggered transitions',
+          reason:
+            'Webhook signature must be verified for webhook-triggered transitions',
         };
       }
     }
@@ -186,7 +188,8 @@ export const TimeWindowCondition: TransitionCondition = {
       return false; // Cannot verify without creation time
     }
 
-    const ageMinutes = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60);
+    const ageMinutes =
+      (Date.now() - new Date(createdAt).getTime()) / (1000 * 60);
     return ageMinutes <= maxAgeMinutes;
   },
   errorMessage: 'Transition is outside the allowed time window',
@@ -209,7 +212,8 @@ export const MinimumAbandonmentTimeCondition: TransitionCondition = {
       return false;
     }
 
-    const minutesSinceUpdate = (Date.now() - new Date(lastUpdatedAt).getTime()) / (1000 * 60);
+    const minutesSinceUpdate =
+      (Date.now() - new Date(lastUpdatedAt).getTime()) / (1000 * 60);
     return minutesSinceUpdate >= minMinutes;
   },
   errorMessage: 'Minimum time has not elapsed for abandonment',

@@ -18,6 +18,7 @@ import {
   VerificationMethod,
   TriggerType,
   ReconciliationResult,
+  ReconciliationResultData,
   TransitionContext,
   Money,
   NormalizedEventType,
@@ -93,7 +94,7 @@ export class TransactionService {
     const context: TransitionContext = {
       currentStatus: transaction.status,
       targetStatus: TransactionStatus.PROCESSING,
-      trigger: TriggerType.MANUAL,
+      triggerType: TriggerType.MANUAL,
       metadata: {
         providerRef: dto.providerRef,
       },
@@ -105,7 +106,7 @@ export class TransactionService {
       context,
     );
 
-    if (!validationResult.allowed) {
+    if (!validationResult.success) {
       throw new Error(
         `Cannot transition from ${transaction.status} to PROCESSING: ${validationResult.reason}`,
       );
@@ -127,7 +128,11 @@ export class TransactionService {
     };
 
     // Update transaction atomically
-    return await this.storageAdapter.markAsProcessing(transactionId, dto, auditEntry);
+    return await this.storageAdapter.markAsProcessing(
+      transactionId,
+      dto,
+      auditEntry,
+    );
   }
 
   /**
@@ -141,7 +146,9 @@ export class TransactionService {
       includeAuditTrail?: boolean;
     } = {},
   ): Promise<Transaction | null> {
-    const transaction = await this.storageAdapter.findTransaction({ id: transactionId });
+    const transaction = await this.storageAdapter.findTransaction({
+      id: transactionId,
+    });
 
     if (!transaction) {
       return null;
@@ -172,7 +179,7 @@ export class TransactionService {
       });
       transaction.metadata = {
         ...transaction.metadata,
-        webhooks: webhooks.map(w => ({
+        webhooks: webhooks.map((w) => ({
           id: w.id,
           eventType: w.eventType,
           receivedAt: w.receivedAt,
@@ -204,7 +211,9 @@ export class TransactionService {
       includeAuditTrail?: boolean;
     } = {},
   ): Promise<Transaction | null> {
-    const transaction = await this.storageAdapter.findTransaction({ applicationRef });
+    const transaction = await this.storageAdapter.findTransaction({
+      applicationRef,
+    });
 
     if (!transaction) {
       return null;
@@ -243,7 +252,7 @@ export class TransactionService {
    * Get audit trail for a transaction
    */
   async getAuditTrail(transactionId: string): Promise<AuditLog[]> {
-    return await this.storageAdapter.getAuditLogs({ transactionId });
+    return await this.storageAdapter.getAuditLogs(transactionId);
   }
 
   /**
@@ -278,9 +287,13 @@ export class TransactionService {
       createdBefore: options.toDate,
     };
 
+    const limit = options.limit || 100;
+    const offset = options.offset || 0;
+    const page = Math.floor(offset / limit) + 1;
+
     const transactions = await this.storageAdapter.findTransactions(query, {
-      limit: options.limit || 100,
-      offset: options.offset || 0,
+      limit,
+      page,
     });
 
     const total = await this.storageAdapter.countTransactions(query);
@@ -308,7 +321,7 @@ export class TransactionService {
       force?: boolean;
       updateStatus?: boolean;
     } = {},
-  ): Promise<ReconciliationResult> {
+  ): Promise<ReconciliationResultData> {
     const transaction = await this.getTransaction(transactionId);
     if (!transaction) {
       throw new Error(`Transaction not found: ${transactionId}`);
@@ -345,7 +358,6 @@ export class TransactionService {
       // Verify with provider
       const providerResult = await adapter.verifyWithProvider(
         transaction.providerRef,
-        { includeDetails: true },
       );
 
       if (!providerResult) {
@@ -383,7 +395,7 @@ export class TransactionService {
         const context: TransitionContext = {
           currentStatus: transaction.status,
           targetStatus: expectedStatus,
-          trigger: TriggerType.RECONCILIATION,
+          triggerType: TriggerType.RECONCILIATION,
           metadata: {
             providerStatus: providerResult.status,
             force: options.force,
@@ -396,7 +408,7 @@ export class TransactionService {
           context,
         );
 
-        if (validationResult.allowed || options.force) {
+        if (validationResult.success || options.force) {
           auditEntry.stateAfter = expectedStatus;
           await this.storageAdapter.updateTransactionStatus(
             transaction.id,
@@ -437,7 +449,8 @@ export class TransactionService {
       return {
         success: false,
         diverged: false,
-        reason: error instanceof Error ? error.message : 'Reconciliation failed',
+        reason:
+          error instanceof Error ? error.message : 'Reconciliation failed',
       };
     }
   }
@@ -445,11 +458,13 @@ export class TransactionService {
   /**
    * Scan for stale transactions that need reconciliation
    */
-  async scanStaleTransactions(options: {
-    staleAfterMinutes?: number;
-    limit?: number;
-    provider?: string;
-  } = {}): Promise<Transaction[]> {
+  async scanStaleTransactions(
+    options: {
+      staleAfterMinutes?: number;
+      limit?: number;
+      provider?: string;
+    } = {},
+  ): Promise<Transaction[]> {
     const staleAfter = new Date(
       Date.now() - (options.staleAfterMinutes || 60) * 60 * 1000,
     );
@@ -462,6 +477,7 @@ export class TransactionService {
 
     return await this.storageAdapter.findTransactions(query, {
       limit: options.limit || 100,
+      page: 1,
     });
   }
 
@@ -506,11 +522,13 @@ export class TransactionService {
   /**
    * Get transaction statistics
    */
-  async getStatistics(options: {
-    provider?: string;
-    fromDate?: Date;
-    toDate?: Date;
-  } = {}): Promise<{
+  async getStatistics(
+    options: {
+      provider?: string;
+      fromDate?: Date;
+      toDate?: Date;
+    } = {},
+  ): Promise<{
     total: number;
     byStatus: Record<TransactionStatus, number>;
     byProvider: Record<string, number>;
@@ -560,7 +578,8 @@ export class TransactionService {
 
     for (const txn of successfulTransactions) {
       const currency = txn.money.currency;
-      stats.totalAmount[currency] = (stats.totalAmount[currency] || 0) + txn.money.amount;
+      stats.totalAmount[currency] =
+        (stats.totalAmount[currency] || 0) + txn.money.amount;
     }
 
     return stats;
@@ -606,16 +625,16 @@ export class TransactionService {
   private mapProviderStatus(providerStatus: string): TransactionStatus {
     // This would be provider-specific, but here's a generic mapping
     const statusMap: Record<string, TransactionStatus> = {
-      'success': TransactionStatus.SUCCESSFUL,
-      'successful': TransactionStatus.SUCCESSFUL,
-      'completed': TransactionStatus.SUCCESSFUL,
-      'failed': TransactionStatus.FAILED,
-      'pending': TransactionStatus.PENDING,
-      'processing': TransactionStatus.PROCESSING,
-      'abandoned': TransactionStatus.ABANDONED,
-      'cancelled': TransactionStatus.ABANDONED,
-      'refunded': TransactionStatus.REFUNDED,
-      'disputed': TransactionStatus.DISPUTED,
+      success: TransactionStatus.SUCCESSFUL,
+      successful: TransactionStatus.SUCCESSFUL,
+      completed: TransactionStatus.SUCCESSFUL,
+      failed: TransactionStatus.FAILED,
+      pending: TransactionStatus.PENDING,
+      processing: TransactionStatus.PROCESSING,
+      abandoned: TransactionStatus.ABANDONED,
+      cancelled: TransactionStatus.ABANDONED,
+      refunded: TransactionStatus.REFUNDED,
+      disputed: TransactionStatus.DISPUTED,
     };
 
     return statusMap[providerStatus.toLowerCase()] || TransactionStatus.PENDING;
@@ -634,7 +653,9 @@ export class TransactionService {
     transitionApplied?: boolean;
   }> {
     // Get webhook log
-    const webhookLogs = await this.storageAdapter.findWebhookLogs({ id: webhookLogId });
+    const webhookLogs = await this.storageAdapter.findWebhookLogs({
+      id: webhookLogId,
+    });
     if (webhookLogs.length === 0) {
       return { success: false, error: 'Webhook log not found' };
     }
@@ -655,14 +676,14 @@ export class TransactionService {
     // Try to apply the transition based on webhook event
     if (webhookLog.metadata?.normalizedEvent) {
       const targetStatus = this.determineTargetStatus(
-        webhookLog.metadata.normalizedEvent.eventType
+        webhookLog.metadata.normalizedEvent.eventType,
       );
 
       if (targetStatus) {
         const context: TransitionContext = {
           currentStatus: transaction.status,
           targetStatus,
-          trigger: TriggerType.LATE_MATCH,
+          triggerType: TriggerType.LATE_MATCH,
           metadata: {
             webhookLogId,
             originalReceivedAt: webhookLog.receivedAt,
@@ -675,11 +696,14 @@ export class TransactionService {
           context,
         );
 
-        if (validationResult.allowed) {
+        if (validationResult.success) {
           // Apply transition atomically
           await this.storageAdapter.withTransaction(async (manager) => {
             // Update webhook log to link it to the transaction
-            await this.storageAdapter.linkWebhookToTransaction(webhookLogId, transactionId);
+            await this.storageAdapter.linkWebhookToTransaction(
+              webhookLogId,
+              transactionId,
+            );
 
             // Apply state transition
             await this.storageAdapter.updateTransactionStatus(
@@ -716,18 +740,24 @@ export class TransactionService {
           return { success: true, transitionApplied: true };
         } else {
           // Transition rejected but still link
-          await this.storageAdapter.linkWebhookToTransaction(webhookLogId, transactionId);
+          await this.storageAdapter.linkWebhookToTransaction(
+            webhookLogId,
+            transactionId,
+          );
           return {
             success: true,
             transitionApplied: false,
-            error: `Transition rejected: ${validationResult.reason}`
+            error: `Transition rejected: ${validationResult.reason}`,
           };
         }
       }
     }
 
     // Just link without transition
-    await this.storageAdapter.linkWebhookToTransaction(webhookLogId, transactionId);
+    await this.storageAdapter.linkWebhookToTransaction(
+      webhookLogId,
+      transactionId,
+    );
     return { success: true, transitionApplied: false };
   }
 
@@ -735,11 +765,13 @@ export class TransactionService {
    * List unmatched webhooks (AC-8.3)
    * Returns webhooks that couldn't be matched to transactions
    */
-  async listUnmatchedWebhooks(options: {
-    provider?: string;
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<{
+  async listUnmatchedWebhooks(
+    options: {
+      provider?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<{
     webhooks: WebhookLog[];
     total: number;
     hasMore: boolean;
@@ -800,7 +832,10 @@ export class TransactionService {
             audit.stateAfter,
           );
 
-          if (eventType && (!options?.eventTypes || options.eventTypes.includes(eventType))) {
+          if (
+            eventType &&
+            (!options?.eventTypes || options.eventTypes.includes(eventType))
+          ) {
             // Get current transaction state
             const transaction = await this.getTransaction(transactionId);
 
@@ -858,8 +893,12 @@ export class TransactionService {
     const now = new Date();
 
     // Calculate cutoff dates
-    const webhookCutoff = new Date(now.getTime() - config.webhookLogDays * 24 * 60 * 60 * 1000);
-    const dispatchCutoff = new Date(now.getTime() - config.dispatchLogDays * 24 * 60 * 60 * 1000);
+    const webhookCutoff = new Date(
+      now.getTime() - config.webhookLogDays * 24 * 60 * 60 * 1000,
+    );
+    const dispatchCutoff = new Date(
+      now.getTime() - config.dispatchLogDays * 24 * 60 * 60 * 1000,
+    );
 
     // Note: This requires StorageAdapter to implement purge methods
     // For now, we'll add a basic implementation that can be extended
@@ -868,13 +907,17 @@ export class TransactionService {
 
     // Check if storage adapter has purge capability
     if ('purgeWebhookLogs' in this.storageAdapter) {
-      webhookLogsDeleted = await (this.storageAdapter as any).purgeWebhookLogs(webhookCutoff);
+      webhookLogsDeleted = await (this.storageAdapter as any).purgeWebhookLogs(
+        webhookCutoff,
+      );
     } else {
       console.warn('Storage adapter does not implement purgeWebhookLogs');
     }
 
     if ('purgeDispatchLogs' in this.storageAdapter) {
-      dispatchLogsDeleted = await (this.storageAdapter as any).purgeDispatchLogs(dispatchCutoff);
+      dispatchLogsDeleted = await (
+        this.storageAdapter as any
+      ).purgeDispatchLogs(dispatchCutoff);
     } else {
       console.warn('Storage adapter does not implement purgeDispatchLogs');
     }
@@ -888,7 +931,9 @@ export class TransactionService {
   /**
    * Helper: Determine target status from normalized event type
    */
-  private determineTargetStatus(eventType: NormalizedEventType): TransactionStatus | null {
+  private determineTargetStatus(
+    eventType: NormalizedEventType,
+  ): TransactionStatus | null {
     const statusMap: Partial<Record<NormalizedEventType, TransactionStatus>> = {
       [NormalizedEventType.PAYMENT_SUCCEEDED]: TransactionStatus.SUCCESSFUL,
       [NormalizedEventType.PAYMENT_FAILED]: TransactionStatus.FAILED,
@@ -933,10 +978,10 @@ export class TransactionService {
     performedAfter?: Date;
     performedBefore?: Date;
   }): Promise<AuditLog[]> {
-    const logs = await this.storageAdapter.getAuditLogs({ transactionId: query.transactionId });
+    const logs = await this.storageAdapter.getAuditLogs(query.transactionId);
 
     // Filter by date if specified
-    return logs.filter(log => {
+    return logs.filter((log) => {
       if (query.performedAfter && log.performedAt < query.performedAfter) {
         return false;
       }

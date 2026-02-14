@@ -1,5 +1,17 @@
-import { applyDecorators, Post, HttpCode, HttpStatus, UseInterceptors } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
+import {
+  applyDecorators,
+  Post,
+  HttpCode,
+  HttpStatus,
+  UseInterceptors,
+} from '@nestjs/common';
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBody,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { RawBodyInterceptor } from '../interceptors/raw-body.interceptor';
 
 /**
@@ -134,7 +146,7 @@ export function MarkAsProcessingDocs() {
           providerRef: { type: 'string', example: 'ps_ref_123' },
           verificationMethod: {
             type: 'string',
-            enum: ['WEBHOOK_ONLY', 'WEBHOOK_AND_API']
+            enum: ['WEBHOOK_ONLY', 'WEBHOOK_AND_API'],
           },
           performedBy: { type: 'string', example: 'user@example.com' },
         },
@@ -160,11 +172,11 @@ export function ReconciliationDocs() {
         properties: {
           force: {
             type: 'boolean',
-            description: 'Force status update even if invalid transition'
+            description: 'Force status update even if invalid transition',
           },
           updateStatus: {
             type: 'boolean',
-            description: 'Update local status if diverged'
+            description: 'Update local status if diverged',
           },
         },
       },

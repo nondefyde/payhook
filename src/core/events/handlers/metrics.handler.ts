@@ -1,4 +1,4 @@
-import { EventHandler, NormalizedEventType } from '../../interfaces';
+import { SimpleEventHandler, NormalizedEventType } from '../../interfaces';
 
 /**
  * Metrics collection event handler
@@ -18,8 +18,16 @@ export class MetricsEventHandler {
   constructor(
     private readonly metricsCollector?: {
       increment: (metric: string, tags?: Record<string, string>) => void;
-      gauge: (metric: string, value: number, tags?: Record<string, string>) => void;
-      histogram: (metric: string, value: number, tags?: Record<string, string>) => void;
+      gauge: (
+        metric: string,
+        value: number,
+        tags?: Record<string, string>,
+      ) => void;
+      histogram: (
+        metric: string,
+        value: number,
+        tags?: Record<string, string>,
+      ) => void;
     },
   ) {
     this.metrics = {
@@ -36,7 +44,7 @@ export class MetricsEventHandler {
   /**
    * Create the event handler function
    */
-  getHandler(): EventHandler {
+  getHandler(): SimpleEventHandler {
     return async (eventType: string, payload: any) => {
       try {
         // Update event counts
@@ -49,7 +57,8 @@ export class MetricsEventHandler {
 
         // Track processing time if available
         if (payload.webhook?.receivedAt) {
-          const processingTime = Date.now() - new Date(payload.webhook.receivedAt).getTime();
+          const processingTime =
+            Date.now() - new Date(payload.webhook.receivedAt).getTime();
           this.metrics.processingTimes.push(processingTime);
 
           // Keep only last 1000 processing times
@@ -69,12 +78,20 @@ export class MetricsEventHandler {
           this.metricsCollector.increment('payhook.event', tags);
 
           if (payload.webhook?.receivedAt) {
-            const processingTime = Date.now() - new Date(payload.webhook.receivedAt).getTime();
-            this.metricsCollector.histogram('payhook.processing_time', processingTime, tags);
+            const processingTime =
+              Date.now() - new Date(payload.webhook.receivedAt).getTime();
+            this.metricsCollector.histogram(
+              'payhook.processing_time',
+              processingTime,
+              tags,
+            );
           }
         }
       } catch (error) {
-        console.error('[MetricsEventHandler] Failed to collect metrics:', error);
+        console.error(
+          '[MetricsEventHandler] Failed to collect metrics:',
+          error,
+        );
       }
     };
   }
@@ -128,10 +145,15 @@ export class MetricsEventHandler {
       disputes: number;
     };
   } {
-    const totalEvents = Array.from(this.metrics.eventCounts.values()).reduce((a, b) => a + b, 0);
-    const averageProcessingTime = this.metrics.processingTimes.length > 0
-      ? this.metrics.processingTimes.reduce((a, b) => a + b, 0) / this.metrics.processingTimes.length
-      : 0;
+    const totalEvents = Array.from(this.metrics.eventCounts.values()).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    const averageProcessingTime =
+      this.metrics.processingTimes.length > 0
+        ? this.metrics.processingTimes.reduce((a, b) => a + b, 0) /
+          this.metrics.processingTimes.length
+        : 0;
 
     const total = this.metrics.successes + this.metrics.errors;
     const successRate = total > 0 ? this.metrics.successes / total : 0;

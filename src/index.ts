@@ -8,14 +8,12 @@
 // Export all core components
 export * from './core';
 
-// Export testing utilities
-export * from './testing';
+// Export testing utilities from _shared
+export { MockWebhookFactory, WebhookScenarios } from './_shared/testing/mock-webhook-factory';
+export type { WebhookOptions, WebhookPayload } from './_shared/testing/mock-webhook-factory';
 
 // Export adapters
 export * from './adapters/storage/mock';
 export * from './adapters/storage/typeorm';
 export * from './adapters/providers/mock';
 export * from './adapters/providers/paystack';
-
-// Export NestJS module
-export * from './modules/payhook';

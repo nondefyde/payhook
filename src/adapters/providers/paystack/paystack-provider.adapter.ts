@@ -7,6 +7,7 @@ import {
   VerifyOptions,
   ProviderConfig,
   ProviderApiCredentials,
+  ProviderError,
 } from '../../../core';
 
 /**
@@ -73,11 +74,12 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
     this.webhookSecrets = webhookSecrets.filter(Boolean);
 
     this.config = {
-      apiBaseUrl: config?.options?.apiUrl || 'https://api.paystack.co',
-      webhookPath: '/webhooks/paystack',
-      timeout: config?.options?.apiTimeout || 30000,
+      apiBaseUrl: config?.options?.apiBaseUrl || 'https://api.paystack.co',
+      webhookPath: config?.options?.webhookPath || '/webhooks/paystack',
+      timeout: config?.options?.timeout || 30000,
       testMode: config?.options?.testMode ?? this.isTestKey(this.secretKey),
-      ...config?.options,
+      retryConfig: config?.options?.retryConfig,
+      customHeaders: config?.options?.customHeaders,
     };
   }
 
@@ -129,7 +131,8 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
     }
 
     // Use provided secrets or fall back to configured webhook secrets
-    const secretsToTry = secrets && secrets.length > 0 ? secrets : this.webhookSecrets;
+    const secretsToTry =
+      secrets && secrets.length > 0 ? secrets : this.webhookSecrets;
 
     if (!secretsToTry || secretsToTry.length === 0) {
       console.warn('PaystackProviderAdapter: No webhook secrets configured');
@@ -190,18 +193,24 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
     const applicationRef =
       data.metadata?.order_id || data.metadata?.transaction_id;
 
+    // Extract customer information
+    const customer = this.extractCustomer(data);
+    const metadata = this.extractMetadata(data);
+
     return {
       eventType,
-      eventId: `${event}_${data.id || Date.now()}`,
-      timestamp: new Date(data.created_at || data.createdAt || Date.now()),
+      providerEventId: `${event}_${data.id || Date.now()}`,
+      providerRef,
       amount,
       currency,
-      providerRef,
       applicationRef,
-      customer: this.extractCustomer(data),
-      metadata: this.extractMetadata(data),
-      rawEvent: event,
-      rawData: data,
+      providerTimestamp: data.created_at || data.createdAt,
+      customerEmail: customer?.email,
+      providerMetadata: {
+        ...metadata,
+        rawEvent: event,
+        customer,
+      },
     };
   }
 
@@ -303,7 +312,7 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
     if (!secretKey) {
       console.warn(
         'PaystackProviderAdapter: No secret key available for API verification. ' +
-        'Configure keys.secretKey in provider configuration.'
+          'Configure keys.secretKey in provider configuration.',
       );
       return null;
     }
@@ -327,7 +336,9 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error(`Paystack API error: ${response.status} ${response.statusText}`);
+        console.error(
+          `Paystack API error: ${response.status} ${response.statusText}`,
+        );
         return null;
       }
 
@@ -341,17 +352,18 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
 
       return {
         status: this.mapApiStatus(data.status),
+        providerRef: data.reference,
         amount: data.amount,
         currency: data.currency || 'NGN',
-        reference: data.reference,
-        providerTransactionId: data.id?.toString(),
-        paidAt: data.paid_at ? new Date(data.paid_at) : undefined,
-        customer: {
-          email: data.customer?.email,
-          id: data.customer?.customer_code,
+        providerTimestamp: data.paid_at || data.created_at,
+        metadata: {
+          providerTransactionId: data.id?.toString(),
+          customer: {
+            email: data.customer?.email,
+            id: data.customer?.customer_code,
+          },
+          rawData: data,
         },
-        metadata: data.metadata,
-        raw: data,
       };
     } catch (error) {
       console.error('Failed to verify with Paystack:', error);
@@ -364,44 +376,50 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
    */
   private mapEventType(event: string): NormalizedEventType {
     const eventMap: Record<string, NormalizedEventType> = {
-      'charge.success': NormalizedEventType.PAYMENT_SUCCEEDED,
+      'charge.success': NormalizedEventType.PAYMENT_SUCCESSFUL,
       'charge.failed': NormalizedEventType.PAYMENT_FAILED,
-      'transfer.success': NormalizedEventType.PAYMENT_SUCCEEDED,
+      'transfer.success': NormalizedEventType.PAYMENT_SUCCESSFUL,
       'transfer.failed': NormalizedEventType.PAYMENT_FAILED,
       'transfer.reversed': NormalizedEventType.PAYMENT_FAILED,
       'invoice.payment_failed': NormalizedEventType.PAYMENT_FAILED,
-      'paymentrequest.pending': NormalizedEventType.PAYMENT_AUTHORIZED,
-      'paymentrequest.success': NormalizedEventType.PAYMENT_SUCCEEDED,
-      'refund.pending': NormalizedEventType.REFUND_INITIATED,
-      'refund.processing': NormalizedEventType.REFUND_INITIATED,
-      'refund.processed': NormalizedEventType.REFUND_COMPLETED,
+      'paymentrequest.pending': NormalizedEventType.PAYMENT_ABANDONED, // Pending state
+      'paymentrequest.success': NormalizedEventType.PAYMENT_SUCCESSFUL,
+      'refund.pending': NormalizedEventType.REFUND_PENDING,
+      'refund.processing': NormalizedEventType.REFUND_PENDING,
+      'refund.processed': NormalizedEventType.REFUND_SUCCESSFUL,
       'refund.failed': NormalizedEventType.REFUND_FAILED,
-      'dispute.create': NormalizedEventType.DISPUTE_CREATED,
-      'dispute.remind': NormalizedEventType.DISPUTE_CREATED,
-      'dispute.resolve': NormalizedEventType.DISPUTE_WON, // Assuming merchant wins by default
-      'subscription.create': NormalizedEventType.PAYMENT_AUTHORIZED,
-      'subscription.disable': NormalizedEventType.PAYMENT_CANCELLED,
-      'subscription.not_renew': NormalizedEventType.PAYMENT_CANCELLED,
-      'subscription.expiring_cards': NormalizedEventType.UNKNOWN,
-      'invoice.update': NormalizedEventType.UNKNOWN,
+      'dispute.create': NormalizedEventType.CHARGE_DISPUTED,
+      'dispute.remind': NormalizedEventType.CHARGE_DISPUTED,
+      'dispute.resolve': NormalizedEventType.DISPUTE_RESOLVED,
+      'subscription.create': NormalizedEventType.PAYMENT_SUCCESSFUL,
+      'subscription.disable': NormalizedEventType.PAYMENT_ABANDONED,
+      'subscription.not_renew': NormalizedEventType.PAYMENT_ABANDONED,
+      'subscription.expiring_cards': NormalizedEventType.PAYMENT_FAILED,
+      'invoice.update': NormalizedEventType.PAYMENT_FAILED,
     };
 
-    return eventMap[event] || NormalizedEventType.UNKNOWN;
+    return eventMap[event] || NormalizedEventType.PAYMENT_FAILED;
   }
 
   /**
    * Map Paystack API status to provider status
    */
-  private mapApiStatus(status: string): string {
+  private mapApiStatus(
+    status: string,
+  ): 'success' | 'failed' | 'pending' | 'abandoned' {
     // Paystack statuses: success, failed, abandoned, pending
-    const statusMap: Record<string, string> = {
-      success: 'successful',
+    const statusMap: Record<
+      string,
+      'success' | 'failed' | 'pending' | 'abandoned'
+    > = {
+      success: 'success',
+      successful: 'success',
       failed: 'failed',
       abandoned: 'abandoned',
       pending: 'pending',
     };
 
-    return statusMap[status.toLowerCase()] || status;
+    return statusMap[status.toLowerCase()] || 'failed';
   }
 
   /**
@@ -462,5 +480,112 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
     const bufferB = Buffer.from(b);
 
     return crypto.timingSafeEqual(bufferA, bufferB);
+  }
+
+  /**
+   * Validate provider-specific configuration
+   */
+  validateConfig(config: Record<string, any>): boolean {
+    // Check for required keys
+    if (!config.keys) {
+      return false;
+    }
+
+    // Must have either secretKey or webhookSecret
+    if (!config.keys.secretKey && !config.keys.webhookSecret) {
+      return false;
+    }
+
+    // If API base URL is provided, it should be a valid URL
+    if (config.options?.apiBaseUrl) {
+      try {
+        new URL(config.options.apiBaseUrl);
+      } catch {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Transform provider error to standardized format
+   */
+  transformError(error: any): ProviderError {
+    if (error.response) {
+      // HTTP error from API
+      return new ProviderError(
+        error.response.data?.message || error.message,
+        `PAYSTACK_${error.response.status}`,
+        this.providerName,
+        {
+          status: error.response.status,
+          data: error.response.data,
+        },
+      );
+    }
+
+    if (error.code) {
+      // Network or other error with code
+      return new ProviderError(
+        error.message,
+        `PAYSTACK_${error.code}`,
+        this.providerName,
+        { originalError: error },
+      );
+    }
+
+    // Generic error
+    return new ProviderError(
+      error.message || 'Unknown error',
+      'PAYSTACK_UNKNOWN',
+      this.providerName,
+      { originalError: error },
+    );
+  }
+
+  /**
+   * Get provider-specific headers for API calls
+   */
+  getApiHeaders(secrets: string[]): Record<string, string> {
+    const secretKey = secrets[0] || this.secretKey;
+
+    if (!secretKey) {
+      throw new Error('No secret key available for API authentication');
+    }
+
+    return {
+      Authorization: `Bearer ${secretKey}`,
+      'Content-Type': 'application/json',
+    };
+  }
+
+  /**
+   * Check if provider is in test mode
+   */
+  isTestMode(rawPayload?: Record<string, any>): boolean {
+    // Check config first
+    if (this.config.testMode !== undefined) {
+      return this.config.testMode;
+    }
+
+    // Check if using test keys
+    if (this.secretKey && this.isTestKey(this.secretKey)) {
+      return true;
+    }
+
+    // Check payload for test mode indicator
+    if (rawPayload?.data?.livemode !== undefined) {
+      return !rawPayload.data.livemode;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get webhook URL path for this provider
+   */
+  getWebhookPath(): string {
+    return this.config.webhookPath || '/webhooks/paystack';
   }
 }

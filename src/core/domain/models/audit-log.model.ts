@@ -26,6 +26,21 @@ export class AuditLog {
   ) {}
 
   /**
+   * Alias properties for compatibility
+   */
+  get stateBefore(): TransactionStatus | null {
+    return this.fromStatus;
+  }
+
+  get stateAfter(): TransactionStatus {
+    return this.toStatus;
+  }
+
+  get performedAt(): Date {
+    return this.createdAt;
+  }
+
+  /**
    * Check if this was an initial creation
    */
   isCreation(): boolean {

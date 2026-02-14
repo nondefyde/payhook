@@ -1,38 +1,30 @@
+import { Controller, Get, Inject, HttpStatus, HttpCode } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import type { StorageAdapter, WebhookProcessor } from '../../../core';
+import { STORAGE_ADAPTER, WEBHOOK_PROCESSOR } from '../constants';
 import {
-  Controller,
-  Get,
-  Inject,
-  HttpStatus,
-  HttpCode,
-} from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { StorageAdapter, WebhookProcessor } from '../../../core';
+  ApiHealthCheck,
+  ApiReadinessCheck,
+  ApiServiceStatistics,
+} from '../../../_shared/swagger/decorators';
 
 /**
  * Health Controller
- *
- * Provides health checks and statistics
+ * Using shared Swagger decorators for cleaner code and better maintainability
  */
 @ApiTags('Health')
 @Controller('health')
 export class HealthController {
   constructor(
-    @Inject(StorageAdapter)
+    @Inject(STORAGE_ADAPTER)
     private readonly storageAdapter: StorageAdapter,
-    @Inject(WebhookProcessor)
+    @Inject(WEBHOOK_PROCESSOR)
     private readonly webhookProcessor: WebhookProcessor,
   ) {}
 
-  /**
-   * Basic health check
-   */
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Basic health check' })
-  @ApiResponse({
-    status: 200,
-    description: 'Service is healthy',
-  })
+  @ApiHealthCheck()
   async health(): Promise<{
     status: string;
     timestamp: Date;
@@ -45,11 +37,8 @@ export class HealthController {
     };
   }
 
-  /**
-   * Detailed health check including dependencies
-   */
   @Get('ready')
-  @ApiOperation({ summary: 'Readiness check with dependency status' })
+  @ApiReadinessCheck()
   async readiness(): Promise<{
     status: string;
     checks: {
@@ -76,11 +65,8 @@ export class HealthController {
     };
   }
 
-  /**
-   * Get service statistics
-   */
   @Get('stats')
-  @ApiOperation({ summary: 'Get service statistics' })
+  @ApiServiceStatistics()
   async statistics(): Promise<any> {
     const storageStats = await this.storageAdapter.getStatistics();
     const pipelineStats = this.webhookProcessor.getStatistics();

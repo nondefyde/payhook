@@ -102,7 +102,7 @@ export class PayHookSecurityGuard implements CanActivate {
     enabled: any;
   } {
     return {
-      rateLimit: this.rateLimitGuard.getConfig ? this.rateLimitGuard.getConfig() : {},
+      rateLimit: this.rateLimitGuard.getConfig(),
       bodySize: this.bodySizeGuard.getConfig(),
       ipAllowlist: this.ipAllowlistGuard.getConfig(),
       enabled: this.enabledGuards,
@@ -112,7 +112,10 @@ export class PayHookSecurityGuard implements CanActivate {
   /**
    * Enable or disable specific guards at runtime
    */
-  setEnabled(guard: 'rateLimit' | 'bodySize' | 'ipAllowlist', enabled: boolean): void {
+  setEnabled(
+    guard: 'rateLimit' | 'bodySize' | 'ipAllowlist',
+    enabled: boolean,
+  ): void {
     this.enabledGuards[guard] = enabled;
   }
 }

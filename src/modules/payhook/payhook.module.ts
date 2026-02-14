@@ -6,6 +6,17 @@ import {
   defaultPayHookConfig,
 } from './payhook.config';
 import {
+  STORAGE_ADAPTER,
+  EVENT_DISPATCHER,
+  PROVIDER_ADAPTERS,
+  PROVIDER_SECRETS,
+  PAYHOOK_CONFIG,
+  TRANSACTION_SERVICE,
+  WEBHOOK_PROCESSOR,
+  PAYHOOK_SERVICE,
+  TRANSACTION_STATE_MACHINE,
+} from './constants';
+import {
   StorageAdapter,
   PaymentProviderAdapter,
   EventDispatcher,
@@ -49,19 +60,19 @@ export class PayHookModule {
       module: PayHookModule,
       providers: [
         {
-          provide: 'PAYHOOK_CONFIG',
+          provide: PAYHOOK_CONFIG,
           useValue: mergedConfig,
         },
         ...providers,
       ],
       controllers,
       exports: [
-        'PAYHOOK_CONFIG',
-        StorageAdapter,
-        TransactionService,
-        PayHookService,
-        WebhookProcessor,
-        EventDispatcher,
+        PAYHOOK_CONFIG,
+        STORAGE_ADAPTER,
+        TRANSACTION_SERVICE,
+        PAYHOOK_SERVICE,
+        WEBHOOK_PROCESSOR,
+        EVENT_DISPATCHER,
       ],
     };
   }
@@ -75,22 +86,15 @@ export class PayHookModule {
     return {
       module: PayHookModule,
       imports: options.imports || [],
-      providers: [
-        ...providers,
-        ...this.createDynamicProviders(),
-      ],
-      controllers: [
-        WebhookController,
-        TransactionController,
-        HealthController,
-      ],
+      providers: [...providers, ...this.createDynamicProviders()],
+      controllers: [WebhookController, TransactionController, HealthController],
       exports: [
-        'PAYHOOK_CONFIG',
-        StorageAdapter,
-        TransactionService,
-        PayHookService,
-        WebhookProcessor,
-        EventDispatcher,
+        PAYHOOK_CONFIG,
+        STORAGE_ADAPTER,
+        TRANSACTION_SERVICE,
+        PAYHOOK_SERVICE,
+        WEBHOOK_PROCESSOR,
+        EVENT_DISPATCHER,
       ],
     };
   }
@@ -103,7 +107,7 @@ export class PayHookModule {
 
     // Storage Adapter
     providers.push({
-      provide: StorageAdapter,
+      provide: STORAGE_ADAPTER,
       useFactory: async () => {
         switch (config.storage.type) {
           case 'mock':
@@ -128,7 +132,7 @@ export class PayHookModule {
 
     // Provider Adapters
     providers.push({
-      provide: 'PROVIDER_ADAPTERS',
+      provide: PROVIDER_ADAPTERS,
       useFactory: () => {
         const adapters = new Map<string, PaymentProviderAdapter>();
 
@@ -144,7 +148,9 @@ export class PayHookModule {
                 adapter = new PaystackProviderAdapter();
                 break;
               default:
-                throw new Error(`Unknown provider adapter: ${providerConfig.adapter}`);
+                throw new Error(
+                  `Unknown provider adapter: ${providerConfig.adapter}`,
+                );
             }
           } else {
             adapter = providerConfig.adapter;
@@ -157,14 +163,26 @@ export class PayHookModule {
       },
     });
 
-    // Provider Secrets
+    // Provider Secrets (extracting from keys configuration)
     providers.push({
-      provide: 'PROVIDER_SECRETS',
+      provide: PROVIDER_SECRETS,
       useFactory: () => {
         const secrets = new Map<string, string[]>();
 
         for (const providerConfig of config.providers) {
-          secrets.set(providerConfig.name, providerConfig.secrets);
+          // Extract secrets from keys configuration
+          const secretKeys: string[] = [];
+          if (providerConfig.keys?.secretKey) {
+            secretKeys.push(providerConfig.keys.secretKey);
+          }
+          if (providerConfig.keys?.webhookSecret) {
+            if (Array.isArray(providerConfig.keys.webhookSecret)) {
+              secretKeys.push(...providerConfig.keys.webhookSecret);
+            } else {
+              secretKeys.push(providerConfig.keys.webhookSecret);
+            }
+          }
+          secrets.set(providerConfig.name, secretKeys);
         }
 
         return secrets;
@@ -173,19 +191,24 @@ export class PayHookModule {
 
     // Event Dispatcher
     providers.push({
-      provide: EventDispatcher,
+      provide: EVENT_DISPATCHER,
       useFactory: () => {
-        const dispatcher = config.events?.dispatcher || new EventDispatcherImpl();
+        const dispatcher =
+          config.events?.dispatcher || new EventDispatcherImpl();
 
         // Add built-in handlers if enabled
         if (config.events?.enableLogging) {
           const loggingHandler = new LoggingEventHandler();
-          dispatcher.onAll(loggingHandler.getHandler());
+          if (dispatcher.onAll) {
+            dispatcher.onAll(loggingHandler.getHandler());
+          }
         }
 
         if (config.events?.enableMetrics) {
           const metricsHandler = new MetricsEventHandler();
-          dispatcher.onAll(metricsHandler.getHandler());
+          if (dispatcher.onAll) {
+            dispatcher.onAll(metricsHandler.getHandler());
+          }
         }
 
         // Add custom handlers
@@ -201,13 +224,13 @@ export class PayHookModule {
 
     // State Machine
     providers.push({
-      provide: TransactionStateMachine,
+      provide: TRANSACTION_STATE_MACHINE,
       useClass: TransactionStateMachine,
     });
 
     // Webhook Processor
     providers.push({
-      provide: WebhookProcessor,
+      provide: WEBHOOK_PROCESSOR,
       useFactory: (
         storageAdapter: StorageAdapter,
         providerAdapters: Map<string, PaymentProviderAdapter>,
@@ -237,30 +260,34 @@ export class PayHookModule {
         return processor;
       },
       inject: [
-        StorageAdapter,
-        'PROVIDER_ADAPTERS',
-        'PROVIDER_SECRETS',
-        EventDispatcher,
-        TransactionStateMachine,
+        STORAGE_ADAPTER,
+        PROVIDER_ADAPTERS,
+        PROVIDER_SECRETS,
+        EVENT_DISPATCHER,
+        TRANSACTION_STATE_MACHINE,
       ],
     });
 
     // Transaction Service
     providers.push({
-      provide: TransactionService,
+      provide: TRANSACTION_SERVICE,
       useFactory: (
         storageAdapter: StorageAdapter,
         providerAdapters: Map<string, PaymentProviderAdapter>,
         stateMachine: TransactionStateMachine,
       ) => {
-        return new TransactionService(storageAdapter, providerAdapters, stateMachine);
+        return new TransactionService(
+          storageAdapter,
+          providerAdapters,
+          stateMachine,
+        );
       },
-      inject: [StorageAdapter, 'PROVIDER_ADAPTERS', TransactionStateMachine],
+      inject: [STORAGE_ADAPTER, PROVIDER_ADAPTERS, TRANSACTION_STATE_MACHINE],
     });
 
     // PayHook Service (main service)
     providers.push({
-      provide: PayHookService,
+      provide: PAYHOOK_SERVICE,
       useClass: PayHookService,
     });
 
@@ -297,10 +324,12 @@ export class PayHookModule {
   /**
    * Create async providers
    */
-  private static createAsyncProviders(options: PayHookModuleAsyncConfig): Provider[] {
+  private static createAsyncProviders(
+    options: PayHookModuleAsyncConfig,
+  ): Provider[] {
     return [
       {
-        provide: 'PAYHOOK_CONFIG',
+        provide: PAYHOOK_CONFIG,
         useFactory: options.useFactory,
         inject: options.inject || [],
       },
@@ -313,7 +342,7 @@ export class PayHookModule {
   private static createDynamicProviders(): Provider[] {
     return [
       {
-        provide: StorageAdapter,
+        provide: STORAGE_ADAPTER,
         useFactory: async (config: PayHookModuleConfig) => {
           const mergedConfig = { ...defaultPayHookConfig, ...config };
 
@@ -333,13 +362,15 @@ export class PayHookModule {
               return mergedConfig.storage.adapter;
 
             default:
-              throw new Error(`Unknown storage type: ${mergedConfig.storage.type}`);
+              throw new Error(
+                `Unknown storage type: ${mergedConfig.storage.type}`,
+              );
           }
         },
-        inject: ['PAYHOOK_CONFIG'],
+        inject: [PAYHOOK_CONFIG],
       },
       {
-        provide: 'PROVIDER_ADAPTERS',
+        provide: PROVIDER_ADAPTERS,
         useFactory: (config: PayHookModuleConfig) => {
           const mergedConfig = { ...defaultPayHookConfig, ...config };
           const adapters = new Map<string, PaymentProviderAdapter>();
@@ -356,7 +387,9 @@ export class PayHookModule {
                   adapter = new PaystackProviderAdapter();
                   break;
                 default:
-                  throw new Error(`Unknown provider adapter: ${providerConfig.adapter}`);
+                  throw new Error(
+                    `Unknown provider adapter: ${providerConfig.adapter}`,
+                  );
               }
             } else {
               adapter = providerConfig.adapter;
@@ -367,36 +400,53 @@ export class PayHookModule {
 
           return adapters;
         },
-        inject: ['PAYHOOK_CONFIG'],
+        inject: [PAYHOOK_CONFIG],
       },
       {
-        provide: 'PROVIDER_SECRETS',
+        provide: PROVIDER_SECRETS,
         useFactory: (config: PayHookModuleConfig) => {
           const mergedConfig = { ...defaultPayHookConfig, ...config };
           const secrets = new Map<string, string[]>();
 
           for (const providerConfig of mergedConfig.providers) {
-            secrets.set(providerConfig.name, providerConfig.secrets);
+            // Extract secrets from keys configuration
+            const secretKeys: string[] = [];
+            if (providerConfig.keys?.secretKey) {
+              secretKeys.push(providerConfig.keys.secretKey);
+            }
+            if (providerConfig.keys?.webhookSecret) {
+              if (Array.isArray(providerConfig.keys.webhookSecret)) {
+                secretKeys.push(...providerConfig.keys.webhookSecret);
+              } else {
+                secretKeys.push(providerConfig.keys.webhookSecret);
+              }
+            }
+            secrets.set(providerConfig.name, secretKeys);
           }
 
           return secrets;
         },
-        inject: ['PAYHOOK_CONFIG'],
+        inject: [PAYHOOK_CONFIG],
       },
       {
-        provide: EventDispatcher,
+        provide: EVENT_DISPATCHER,
         useFactory: (config: PayHookModuleConfig) => {
           const mergedConfig = { ...defaultPayHookConfig, ...config };
-          const dispatcher = mergedConfig.events?.dispatcher || new EventDispatcherImpl();
+          const dispatcher =
+            mergedConfig.events?.dispatcher || new EventDispatcherImpl();
 
           if (mergedConfig.events?.enableLogging) {
             const loggingHandler = new LoggingEventHandler();
-            dispatcher.onAll(loggingHandler.getHandler());
+            if (dispatcher.onAll) {
+              dispatcher.onAll(loggingHandler.getHandler());
+            }
           }
 
           if (mergedConfig.events?.enableMetrics) {
             const metricsHandler = new MetricsEventHandler();
-            dispatcher.onAll(metricsHandler.getHandler());
+            if (dispatcher.onAll) {
+              dispatcher.onAll(metricsHandler.getHandler());
+            }
           }
 
           if (mergedConfig.events?.handlers) {
@@ -407,14 +457,14 @@ export class PayHookModule {
 
           return dispatcher;
         },
-        inject: ['PAYHOOK_CONFIG'],
+        inject: [PAYHOOK_CONFIG],
       },
       {
-        provide: TransactionStateMachine,
+        provide: TRANSACTION_STATE_MACHINE,
         useClass: TransactionStateMachine,
       },
       {
-        provide: WebhookProcessor,
+        provide: WEBHOOK_PROCESSOR,
         useFactory: (
           config: PayHookModuleConfig,
           storageAdapter: StorageAdapter,
@@ -430,7 +480,8 @@ export class PayHookModule {
             providerAdapters,
             eventDispatcher,
             stateMachine,
-            skipSignatureVerification: mergedConfig.webhooks?.skipSignatureVerification,
+            skipSignatureVerification:
+              mergedConfig.webhooks?.skipSignatureVerification,
             storeRawPayload: mergedConfig.webhooks?.storeRawPayload,
             redactKeys: mergedConfig.webhooks?.redactKeys,
             timeoutMs: mergedConfig.webhooks?.timeoutMs,
@@ -443,27 +494,31 @@ export class PayHookModule {
           return processor;
         },
         inject: [
-          'PAYHOOK_CONFIG',
-          StorageAdapter,
-          'PROVIDER_ADAPTERS',
-          'PROVIDER_SECRETS',
-          EventDispatcher,
-          TransactionStateMachine,
+          PAYHOOK_CONFIG,
+          STORAGE_ADAPTER,
+          PROVIDER_ADAPTERS,
+          PROVIDER_SECRETS,
+          EVENT_DISPATCHER,
+          TRANSACTION_STATE_MACHINE,
         ],
       },
       {
-        provide: TransactionService,
+        provide: TRANSACTION_SERVICE,
         useFactory: (
           storageAdapter: StorageAdapter,
           providerAdapters: Map<string, PaymentProviderAdapter>,
           stateMachine: TransactionStateMachine,
         ) => {
-          return new TransactionService(storageAdapter, providerAdapters, stateMachine);
+          return new TransactionService(
+            storageAdapter,
+            providerAdapters,
+            stateMachine,
+          );
         },
-        inject: [StorageAdapter, 'PROVIDER_ADAPTERS', TransactionStateMachine],
+        inject: [STORAGE_ADAPTER, PROVIDER_ADAPTERS, TRANSACTION_STATE_MACHINE],
       },
       {
-        provide: PayHookService,
+        provide: PAYHOOK_SERVICE,
         useClass: PayHookService,
       },
       {

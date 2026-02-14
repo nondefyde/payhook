@@ -78,7 +78,9 @@ export class DispatchLog {
    * Check if should retry based on count and status
    */
   shouldRetry(maxRetries: number): boolean {
-    return this.status === DispatchStatus.FAILED && this.retryCount < maxRetries;
+    return (
+      this.status === DispatchStatus.FAILED && this.retryCount < maxRetries
+    );
   }
 
   /**

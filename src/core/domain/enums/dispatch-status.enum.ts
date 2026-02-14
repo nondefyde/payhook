@@ -4,9 +4,19 @@
  */
 export enum DispatchStatus {
   /**
+   * Event is pending dispatch
+   */
+  PENDING = 'pending',
+
+  /**
    * Handler executed successfully
    */
   SUCCESS = 'success',
+
+  /**
+   * Event delivered successfully
+   */
+  DELIVERED = 'delivered',
 
   /**
    * Handler execution failed

@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { Request } from 'express';
 import * as ipRangeCheck from 'ip-range-check';
 
@@ -38,8 +44,11 @@ export class PayHookIpAllowlistGuard implements CanActivate {
   }) {
     this.allowedIps = config?.allowedIps || [];
     this.checkProxyHeaders = config?.checkProxyHeaders !== false; // Default true
-    this.denyMessage = config?.denyMessage || 'Access denied: IP not in allowlist';
-    this.providerIpMappings = new Map(Object.entries(config?.providerIpMappings || {}));
+    this.denyMessage =
+      config?.denyMessage || 'Access denied: IP not in allowlist';
+    this.providerIpMappings = new Map(
+      Object.entries(config?.providerIpMappings || {}),
+    );
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -47,25 +56,37 @@ export class PayHookIpAllowlistGuard implements CanActivate {
 
     // If no IPs configured, allow all (fail-open for dev environments)
     if (this.allowedIps.length === 0 && this.providerIpMappings.size === 0) {
-      console.warn('PayHookIpAllowlistGuard: No IP restrictions configured. Allowing all requests.');
+      console.warn(
+        'PayHookIpAllowlistGuard: No IP restrictions configured. Allowing all requests.',
+      );
       return true;
     }
 
     const clientIp = this.getClientIp(request);
 
     if (!clientIp) {
-      throw new HttpException({
-        statusCode: HttpStatus.FORBIDDEN,
-        message: 'Unable to determine client IP address',
-        error: 'Forbidden',
-      }, HttpStatus.FORBIDDEN);
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.FORBIDDEN,
+          message: 'Unable to determine client IP address',
+          error: 'Forbidden',
+        },
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // Check if provider-specific IPs are configured
-    const provider = request.params?.provider;
+    const providerParam = request.params?.provider;
+    const provider = Array.isArray(providerParam)
+      ? providerParam[0]
+      : providerParam;
     let allowedList = [...this.allowedIps];
 
-    if (provider && this.providerIpMappings.has(provider)) {
+    if (
+      provider &&
+      typeof provider === 'string' &&
+      this.providerIpMappings.has(provider)
+    ) {
       // Add provider-specific IPs to the allowed list
       allowedList = [...allowedList, ...this.providerIpMappings.get(provider)!];
     }
@@ -75,15 +96,20 @@ export class PayHookIpAllowlistGuard implements CanActivate {
 
     if (!isAllowed) {
       // Log the denied attempt for security monitoring
-      console.warn(`PayHookIpAllowlistGuard: Denied access from IP ${clientIp} for provider ${provider || 'unknown'}`);
+      console.warn(
+        `PayHookIpAllowlistGuard: Denied access from IP ${clientIp} for provider ${provider || 'unknown'}`,
+      );
 
-      throw new HttpException({
-        statusCode: HttpStatus.FORBIDDEN,
-        message: this.denyMessage,
-        error: 'Forbidden',
-        clientIp,
-        provider,
-      }, HttpStatus.FORBIDDEN);
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.FORBIDDEN,
+          message: this.denyMessage,
+          error: 'Forbidden',
+          clientIp,
+          provider,
+        },
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // Add IP info to request for logging
@@ -107,7 +133,9 @@ export class PayHookIpAllowlistGuard implements CanActivate {
       const forwarded = request.headers['x-forwarded-for'];
       if (forwarded) {
         // Take the first IP in the chain (original client)
-        ip = (typeof forwarded === 'string' ? forwarded : forwarded[0]).split(',')[0].trim();
+        ip = (typeof forwarded === 'string' ? forwarded : forwarded[0])
+          .split(',')[0]
+          .trim();
       }
 
       // Check other proxy headers
@@ -122,10 +150,11 @@ export class PayHookIpAllowlistGuard implements CanActivate {
 
     // Fall back to connection remote address
     if (!ip) {
-      ip = request.connection.remoteAddress ||
-           request.socket.remoteAddress ||
-           (request.connection as any).socket?.remoteAddress ||
-           null;
+      ip =
+        request.connection.remoteAddress ||
+        request.socket.remoteAddress ||
+        (request.connection as any).socket?.remoteAddress ||
+        null;
     }
 
     // Handle IPv6 mapped IPv4 addresses (::ffff:192.168.1.1)
@@ -174,7 +203,7 @@ export class PayHookIpAllowlistGuard implements CanActivate {
 
       // Range check (192.168.1.1-192.168.1.255)
       if (allowed.includes('-')) {
-        const [start, end] = allowed.split('-').map(s => s.trim());
+        const [start, end] = allowed.split('-').map((s) => s.trim());
         if (this.isIpInRange(ip, start, end)) {
           return true;
         }

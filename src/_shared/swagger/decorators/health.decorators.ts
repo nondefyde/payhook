@@ -32,7 +32,8 @@ export const ApiReadinessCheck = () => {
   return applyDecorators(
     ApiOperation({
       summary: 'Readiness check with dependency status',
-      description: 'Checks if service and all dependencies are ready to handle requests',
+      description:
+        'Checks if service and all dependencies are ready to handle requests',
     }),
     ApiResponse({
       status: 200,
@@ -78,7 +79,8 @@ export const ApiServiceStatistics = () => {
   return applyDecorators(
     ApiOperation({
       summary: 'Get service statistics',
-      description: 'Returns comprehensive statistics about service usage and performance',
+      description:
+        'Returns comprehensive statistics about service usage and performance',
     }),
     ApiResponse({
       status: 200,

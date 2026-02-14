@@ -1,8 +1,4 @@
-import {
-  PipelineStage,
-  WebhookContext,
-  StageResult,
-} from '../types';
+import { PipelineStage, WebhookContext, StageResult } from '../types';
 import {
   StorageAdapter,
   CreateWebhookLogDto,
@@ -34,13 +30,15 @@ export class PersistClaimStage implements PipelineStage {
       const webhookLogDto: CreateWebhookLogDto = {
         provider: context.provider,
         eventType: context.metadata?.eventType || 'unknown',
-        providerEventId: context.metadata?.idempotencyKey || this.generateFallbackId(context),
+        providerEventId:
+          context.metadata?.idempotencyKey || this.generateFallbackId(context),
         rawPayload: this.storeRawPayload
           ? this.redactSensitiveData(context.rawBody, this.redactKeys)
-          : undefined,
+          : {},
         headers: this.redactHeaders(context.headers),
         signatureValid: context.signatureValid ?? false,
-        processingStatus: context.processingStatus || ProcessingStatus.PROCESSED,
+        processingStatus:
+          context.processingStatus || ProcessingStatus.PROCESSED,
         processingDurationMs: Date.now() - context.startTime.getTime(),
         receivedAt: context.receivedAt,
         metadata: {
@@ -145,18 +143,18 @@ export class PersistClaimStage implements PipelineStage {
   private redactSensitiveData(
     rawBody: Buffer,
     redactKeys: string[],
-  ): Buffer {
-    if (redactKeys.length === 0) {
-      return rawBody;
-    }
-
+  ): Record<string, any> {
     try {
       const payload = JSON.parse(rawBody.toString());
-      const redacted = this.deepRedact(payload, redactKeys);
-      return Buffer.from(JSON.stringify(redacted));
+
+      if (redactKeys.length === 0) {
+        return payload;
+      }
+
+      return this.deepRedact(payload, redactKeys);
     } catch {
-      // If not JSON, return as-is
-      return rawBody;
+      // If not JSON, return as base64 string
+      return { raw: rawBody.toString('base64') };
     }
   }
 
@@ -169,14 +167,16 @@ export class PersistClaimStage implements PipelineStage {
     }
 
     if (Array.isArray(obj)) {
-      return obj.map(item => this.deepRedact(item, redactKeys));
+      return obj.map((item) => this.deepRedact(item, redactKeys));
     }
 
     const result: Record<string, any> = {};
     for (const [key, value] of Object.entries(obj)) {
-      if (redactKeys.some(redactKey =>
-        key.toLowerCase().includes(redactKey.toLowerCase())
-      )) {
+      if (
+        redactKeys.some((redactKey) =>
+          key.toLowerCase().includes(redactKey.toLowerCase()),
+        )
+      ) {
         result[key] = '[REDACTED]';
       } else {
         result[key] = this.deepRedact(value, redactKeys);
@@ -200,9 +200,11 @@ export class PersistClaimStage implements PipelineStage {
 
     const redacted: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers)) {
-      if (sensitiveHeaders.some(sensitive =>
-        key.toLowerCase().includes(sensitive)
-      )) {
+      if (
+        sensitiveHeaders.some((sensitive) =>
+          key.toLowerCase().includes(sensitive),
+        )
+      ) {
         redacted[key] = '[REDACTED]';
       } else {
         redacted[key] = value;

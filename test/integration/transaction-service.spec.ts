@@ -5,7 +5,9 @@ import {
   TransactionStateMachine,
   TransactionStatus,
   VerificationMethod,
-  Money,
+  ProcessingStatus,
+  AuditAction,
+  TriggerType,
 } from '../../src';
 
 describe('TransactionService Integration Tests', () => {
@@ -22,7 +24,11 @@ describe('TransactionService Integration Tests', () => {
       ['paystack', new MockProviderAdapter()], // Simulating multiple providers
     ]);
 
-    service = new TransactionService(storageAdapter, providerAdapters, stateMachine);
+    service = new TransactionService(
+      storageAdapter,
+      providerAdapters,
+      stateMachine,
+    );
   });
 
   afterEach(() => {
@@ -52,7 +58,7 @@ describe('TransactionService Integration Tests', () => {
       // Verify audit log was created
       const auditLogs = await service.getAuditTrail(transaction.id);
       expect(auditLogs).toHaveLength(1);
-      expect(auditLogs[0].action).toBe('TRANSACTION_CREATED');
+      expect(auditLogs[0].triggerType).toBe(TriggerType.MANUAL);
     });
 
     it('should validate money amounts', async () => {
@@ -60,9 +66,9 @@ describe('TransactionService Integration Tests', () => {
         service.createTransaction({
           applicationRef: 'app_invalid',
           provider: 'mock',
-          amount: 100.50, // Non-integer amount
+          amount: 100.5, // Non-integer amount
           currency: 'USD',
-        })
+        }),
       ).rejects.toThrow('Amount must be an integer');
     });
   });
@@ -88,9 +94,11 @@ describe('TransactionService Integration Tests', () => {
       // Verify audit trail
       const auditLogs = await service.getAuditTrail(transaction.id);
       expect(auditLogs).toHaveLength(2);
-      const transition = auditLogs.find(log => log.action === 'MANUAL_TRANSITION');
-      expect(transition?.stateBefore).toBe(TransactionStatus.PENDING);
-      expect(transition?.stateAfter).toBe(TransactionStatus.PROCESSING);
+      const transition = auditLogs.find(
+        (log) => log.triggerType === TriggerType.MANUAL,
+      );
+      expect(transition?.fromStatus).toBe(TransactionStatus.PENDING);
+      expect(transition?.toStatus).toBe(TransactionStatus.PROCESSING);
     });
 
     it('should reject invalid state transitions', async () => {
@@ -107,11 +115,10 @@ describe('TransactionService Integration Tests', () => {
         TransactionStatus.FAILED,
         {
           transactionId: transaction.id,
-          action: 'MANUAL_TRANSITION',
-          performedBy: 'test',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PENDING,
-          stateAfter: TransactionStatus.FAILED,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.FAILED,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
         },
       );
 
@@ -119,7 +126,7 @@ describe('TransactionService Integration Tests', () => {
       await expect(
         service.markAsProcessing(transaction.id, {
           providerRef: 'prov_003',
-        })
+        }),
       ).rejects.toThrow('Cannot transition from failed to processing');
     });
   });
@@ -140,9 +147,11 @@ describe('TransactionService Integration Tests', () => {
         providerEventId: 'evt_001',
         transactionId: created.id,
         signatureValid: true,
-        processingStatus: 'processed',
+        processingStatus: ProcessingStatus.PROCESSED,
         processingDurationMs: 100,
         receivedAt: new Date(),
+        rawPayload: {},
+        headers: {},
       });
 
       // Get with webhooks
@@ -170,7 +179,8 @@ describe('TransactionService Integration Tests', () => {
         currency: 'NGN',
       });
 
-      const found = await service.getTransactionByApplicationRef('unique_app_ref_123');
+      const found =
+        await service.getTransactionByApplicationRef('unique_app_ref_123');
 
       expect(found).toBeDefined();
       expect(found?.id).toBe(created.id);
@@ -189,7 +199,10 @@ describe('TransactionService Integration Tests', () => {
         providerRef: 'unique_prov_ref_456',
       });
 
-      const found = await service.getTransactionByProviderRef('mock', 'unique_prov_ref_456');
+      const found = await service.getTransactionByProviderRef(
+        'mock',
+        'unique_prov_ref_456',
+      );
 
       expect(found).toBeDefined();
       expect(found?.id).toBe(created.id);
@@ -220,25 +233,33 @@ describe('TransactionService Integration Tests', () => {
       ]);
 
       // List all pending transactions
-      const pending = await service.listTransactionsByStatus(TransactionStatus.PENDING);
+      const pending = await service.listTransactionsByStatus(
+        TransactionStatus.PENDING,
+      );
 
       expect(pending.transactions).toHaveLength(3);
       expect(pending.total).toBe(3);
       expect(pending.hasMore).toBe(false);
 
       // List with provider filter
-      const mockOnly = await service.listTransactionsByStatus(TransactionStatus.PENDING, {
-        provider: 'mock',
-      });
+      const mockOnly = await service.listTransactionsByStatus(
+        TransactionStatus.PENDING,
+        {
+          provider: 'mock',
+        },
+      );
 
       expect(mockOnly.transactions).toHaveLength(2);
       expect(mockOnly.total).toBe(2);
 
       // List with pagination
-      const paginated = await service.listTransactionsByStatus(TransactionStatus.PENDING, {
-        limit: 2,
-        offset: 0,
-      });
+      const paginated = await service.listTransactionsByStatus(
+        TransactionStatus.PENDING,
+        {
+          limit: 2,
+          offset: 0,
+        },
+      );
 
       expect(paginated.transactions).toHaveLength(2);
       expect(paginated.total).toBe(3);
@@ -261,12 +282,12 @@ describe('TransactionService Integration Tests', () => {
 
       // Mock provider verification result
       const mockProvider = providerAdapters.get('mock')!;
-      mockProvider.addMockTransaction('prov_reconcile', {
+      mockProvider.createMockTransaction({
         status: 'successful',
         amount: 5000,
         currency: 'USD',
         reference: 'prov_reconcile',
-        timestamp: new Date(),
+        createdAt: new Date().toISOString(),
       });
 
       // Reconcile
@@ -287,7 +308,9 @@ describe('TransactionService Integration Tests', () => {
 
       // Verify audit log
       const auditLogs = await service.getAuditTrail(transaction.id);
-      const reconciliation = auditLogs.find(log => log.action === 'RECONCILIATION');
+      const reconciliation = auditLogs.find(
+        (log) => log.triggerType === TriggerType.RECONCILIATION,
+      );
       expect(reconciliation).toBeDefined();
       expect(reconciliation?.metadata?.diverged).toBe(true);
     });
@@ -353,11 +376,10 @@ describe('TransactionService Integration Tests', () => {
         TransactionStatus.SUCCESSFUL,
         {
           transactionId: transactions[0].id,
-          action: 'WEBHOOK_STATE_TRANSITION',
-          performedBy: 'system',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PENDING,
-          stateAfter: TransactionStatus.SUCCESSFUL,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.SUCCESSFUL,
+          triggerType: TriggerType.WEBHOOK,
+          actor: 'system',
         },
       );
 
@@ -366,11 +388,10 @@ describe('TransactionService Integration Tests', () => {
         TransactionStatus.SUCCESSFUL,
         {
           transactionId: transactions[1].id,
-          action: 'WEBHOOK_STATE_TRANSITION',
-          performedBy: 'system',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PENDING,
-          stateAfter: TransactionStatus.SUCCESSFUL,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.SUCCESSFUL,
+          triggerType: TriggerType.WEBHOOK,
+          actor: 'system',
         },
       );
 
@@ -410,7 +431,9 @@ describe('TransactionService Integration Tests', () => {
 
       // Verify audit log
       const auditLogs = await service.getAuditTrail(transaction.id);
-      const metadataUpdate = auditLogs.find(log => log.action === 'METADATA_UPDATED');
+      const metadataUpdate = auditLogs.find(
+        (log) => log.metadata?.action === AuditAction.METADATA_UPDATED,
+      );
       expect(metadataUpdate).toBeDefined();
       expect(metadataUpdate?.metadata?.updatedFields).toContain('additional');
       expect(metadataUpdate?.metadata?.updatedFields).toContain('timestamp');

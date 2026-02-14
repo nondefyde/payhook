@@ -60,7 +60,11 @@ export class StateEngineStage implements PipelineStage {
         }
 
         // If still not found and auto-create is enabled
-        if (!transaction && this.autoCreateTransactions && this.shouldAutoCreate(context)) {
+        if (
+          !transaction &&
+          this.autoCreateTransactions &&
+          this.shouldAutoCreate(context)
+        ) {
           transaction = await this.createTransaction(context);
         }
       }
@@ -74,11 +78,11 @@ export class StateEngineStage implements PipelineStage {
           await this.storageAdapter.updateWebhookLogStatus(
             context.webhookLog.id,
             ProcessingStatus.UNMATCHED,
-            {
+            JSON.stringify({
               reason: 'No matching transaction found',
               providerRef: context.metadata?.providerRef,
               applicationRef: context.metadata?.applicationRef,
-            },
+            }),
           );
         }
 
@@ -98,7 +102,9 @@ export class StateEngineStage implements PipelineStage {
       context.transaction = transaction;
 
       // Determine target status based on normalized event
-      const targetStatus = this.determineTargetStatus(context.normalizedEvent.eventType);
+      const targetStatus = this.determineTargetStatus(
+        context.normalizedEvent.eventType,
+      );
 
       if (!targetStatus) {
         // Event doesn't map to a state transition
@@ -134,7 +140,7 @@ export class StateEngineStage implements PipelineStage {
       const transitionContext: TransitionContext = {
         currentStatus: transaction.status,
         targetStatus,
-        trigger: TriggerType.WEBHOOK,
+        triggerType: TriggerType.WEBHOOK,
         metadata: {
           webhookLogId: context.webhookLog?.id,
           provider: context.provider,
@@ -150,7 +156,7 @@ export class StateEngineStage implements PipelineStage {
         transitionContext,
       );
 
-      if (!validationResult.allowed) {
+      if (!validationResult.success) {
         // Transition not allowed
         context.processingStatus = ProcessingStatus.TRANSITION_REJECTED;
 
@@ -204,11 +210,12 @@ export class StateEngineStage implements PipelineStage {
       };
 
       // Update transaction status with audit
-      const updatedTransaction = await this.storageAdapter.updateTransactionStatus(
-        transaction.id,
-        targetStatus,
-        auditEntry,
-      );
+      const updatedTransaction =
+        await this.storageAdapter.updateTransactionStatus(
+          transaction.id,
+          targetStatus,
+          auditEntry,
+        );
 
       // Update context
       context.transaction = updatedTransaction;
@@ -259,7 +266,8 @@ export class StateEngineStage implements PipelineStage {
       query.applicationRef = context.metadata.applicationRef;
     }
 
-    return await this.storageAdapter.findTransaction(query);
+    const result = await this.storageAdapter.findTransaction(query);
+    return result || undefined;
   }
 
   /**
@@ -267,11 +275,12 @@ export class StateEngineStage implements PipelineStage {
    */
   private async createTransaction(context: WebhookContext) {
     if (!context.normalizedEvent) {
-      return null;
+      return undefined;
     }
 
     const dto: CreateTransactionDto = {
-      applicationRef: context.metadata?.applicationRef ||
+      applicationRef:
+        context.metadata?.applicationRef ||
         `auto_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       provider: context.provider,
       amount: context.normalizedEvent.amount,
@@ -305,7 +314,7 @@ export class StateEngineStage implements PipelineStage {
       metadata: {
         autoCreated: true,
         webhookLogId: context.webhookLog?.id,
-        trigger: 'webhook',
+        triggerType: TriggerType.WEBHOOK,
       },
     };
 
@@ -335,19 +344,30 @@ export class StateEngineStage implements PipelineStage {
   /**
    * Map normalized event type to target transaction status
    */
-  private determineTargetStatus(eventType: NormalizedEventType): TransactionStatus | null {
-    const statusMap: Record<NormalizedEventType, TransactionStatus | null> = {
+  private determineTargetStatus(
+    eventType: NormalizedEventType,
+  ): TransactionStatus | null {
+    const statusMap: Partial<
+      Record<NormalizedEventType, TransactionStatus | null>
+    > = {
       [NormalizedEventType.PAYMENT_AUTHORIZED]: TransactionStatus.PROCESSING,
       [NormalizedEventType.PAYMENT_CAPTURED]: TransactionStatus.PROCESSING,
       [NormalizedEventType.PAYMENT_SUCCEEDED]: TransactionStatus.SUCCESSFUL,
+      [NormalizedEventType.PAYMENT_SUCCESSFUL]: TransactionStatus.SUCCESSFUL,
       [NormalizedEventType.PAYMENT_FAILED]: TransactionStatus.FAILED,
+      [NormalizedEventType.PAYMENT_ABANDONED]: TransactionStatus.ABANDONED,
       [NormalizedEventType.PAYMENT_CANCELLED]: TransactionStatus.ABANDONED,
       [NormalizedEventType.PAYMENT_EXPIRED]: TransactionStatus.ABANDONED,
       [NormalizedEventType.REFUND_INITIATED]: TransactionStatus.REFUNDED,
       [NormalizedEventType.REFUND_COMPLETED]: TransactionStatus.REFUNDED,
-      [NormalizedEventType.REFUND_PARTIAL]: TransactionStatus.PARTIALLY_REFUNDED,
+      [NormalizedEventType.REFUND_SUCCESSFUL]: TransactionStatus.REFUNDED,
+      [NormalizedEventType.REFUND_PENDING]: TransactionStatus.REFUNDED,
+      [NormalizedEventType.REFUND_PARTIAL]:
+        TransactionStatus.PARTIALLY_REFUNDED,
       [NormalizedEventType.REFUND_FAILED]: null, // No status change
+      [NormalizedEventType.CHARGE_DISPUTED]: TransactionStatus.DISPUTED,
       [NormalizedEventType.DISPUTE_CREATED]: TransactionStatus.DISPUTED,
+      [NormalizedEventType.DISPUTE_RESOLVED]: TransactionStatus.SUCCESSFUL, // Depends on outcome
       [NormalizedEventType.DISPUTE_WON]: TransactionStatus.RESOLVED_WON,
       [NormalizedEventType.DISPUTE_LOST]: TransactionStatus.RESOLVED_LOST,
       [NormalizedEventType.DISPUTE_CANCELLED]: TransactionStatus.SUCCESSFUL, // Back to successful

@@ -9,3 +9,6 @@ export * from './dto';
 
 // Swagger decorators for clean controllers
 export * from './swagger';
+
+// Testing utilities
+export * from './testing/mock-webhook-factory';

@@ -1,4 +1,8 @@
-import { TransactionStatus, TriggerType, NormalizedEventType } from '../domain/enums';
+import {
+  TransactionStatus,
+  TriggerType,
+  NormalizedEventType,
+} from '../domain/enums';
 
 /**
  * State transition definition
@@ -55,6 +59,7 @@ export interface TransitionContext {
  */
 export interface TransitionResult {
   success: boolean;
+  allowed?: boolean; // Alternative name for success
   fromStatus: TransactionStatus;
   toStatus: TransactionStatus;
   reason?: string;

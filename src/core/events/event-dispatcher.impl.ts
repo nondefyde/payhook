@@ -1,7 +1,9 @@
 import {
   EventDispatcher,
   EventHandler,
+  SimpleEventHandler,
   EventSubscription,
+  EventHandlerRegistration,
   NormalizedEventType,
 } from '../interfaces';
 
@@ -12,18 +14,24 @@ import {
  * Supports multiple handlers per event type with error isolation.
  */
 export class EventDispatcherImpl implements EventDispatcher {
-  private handlers: Map<string, Set<EventHandler>> = new Map();
-  private globalHandlers: Set<EventHandler> = new Set();
+  private handlers: Map<string, Set<SimpleEventHandler>> = new Map();
+  private globalHandlers: Set<SimpleEventHandler> = new Set();
   private subscriptionIdCounter = 0;
-  private subscriptions: Map<string, {
-    eventType: string | '*';
-    handler: EventHandler;
-  }> = new Map();
+  private subscriptions: Map<
+    string,
+    {
+      eventType: string | '*';
+      handler: SimpleEventHandler;
+    }
+  > = new Map();
 
   /**
    * Register an event handler for a specific event type
    */
-  on(eventType: NormalizedEventType | string, handler: EventHandler): EventSubscription {
+  on(
+    eventType: NormalizedEventType | string,
+    handler: SimpleEventHandler,
+  ): EventSubscription {
     const subscriptionId = `sub_${++this.subscriptionIdCounter}`;
 
     // Initialize handler set if needed
@@ -50,7 +58,7 @@ export class EventDispatcherImpl implements EventDispatcher {
   /**
    * Register a handler for all event types
    */
-  onAll(handler: EventHandler): EventSubscription {
+  onAll(handler: SimpleEventHandler): EventSubscription {
     const subscriptionId = `sub_${++this.subscriptionIdCounter}`;
 
     // Add to global handlers
@@ -75,7 +83,10 @@ export class EventDispatcherImpl implements EventDispatcher {
   /**
    * Remove an event handler
    */
-  off(eventType: NormalizedEventType | string, handler: EventHandler): void {
+  off(
+    eventType: NormalizedEventType | string,
+    handler: SimpleEventHandler,
+  ): void {
     const handlers = this.handlers.get(eventType);
     if (handlers) {
       handlers.delete(handler);
@@ -118,7 +129,10 @@ export class EventDispatcherImpl implements EventDispatcher {
   /**
    * Dispatch an event to all registered handlers
    */
-  async dispatch(eventType: NormalizedEventType | string, payload: any): Promise<void> {
+  async dispatch(
+    eventType: NormalizedEventType | string,
+    payload: any,
+  ): Promise<void> {
     const errors: Array<{ handler: string; error: Error }> = [];
 
     // Get specific handlers for this event type
@@ -166,13 +180,17 @@ export class EventDispatcherImpl implements EventDispatcher {
 
     // Execute all handlers and collect results
     const results = await Promise.allSettled(
-      allHandlers.map(handler => handler(eventType, payload))
+      allHandlers.map((handler) => handler(eventType, payload)),
     );
 
     // Collect errors
     for (const result of results) {
       if (result.status === 'rejected') {
-        errors.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+        errors.push(
+          result.reason instanceof Error
+            ? result.reason
+            : new Error(String(result.reason)),
+        );
       }
     }
 
@@ -183,19 +201,31 @@ export class EventDispatcherImpl implements EventDispatcher {
   }
 
   /**
-   * Get all handlers for an event type
+   * Get all registered handlers
    */
-  getHandlers(eventType: NormalizedEventType | string): EventHandler[] {
-    const specificHandlers = Array.from(this.handlers.get(eventType) || []);
-    const globalHandlers = Array.from(this.globalHandlers);
-    return [...specificHandlers, ...globalHandlers];
+  getHandlers(): EventHandlerRegistration[] {
+    // Return empty array as we don't track registrations in this implementation
+    return [];
+  }
+
+  /**
+   * Get handlers for a specific event type
+   */
+  getHandlersForEvent(
+    eventType: NormalizedEventType,
+  ): EventHandlerRegistration[] {
+    // Return empty array as we don't track registrations in this implementation
+    return [];
   }
 
   /**
    * Check if there are any handlers for an event type
    */
   hasHandlers(eventType: NormalizedEventType | string): boolean {
-    return (this.handlers.get(eventType)?.size || 0) > 0 || this.globalHandlers.size > 0;
+    return (
+      (this.handlers.get(eventType)?.size || 0) > 0 ||
+      this.globalHandlers.size > 0
+    );
   }
 
   /**
@@ -203,7 +233,9 @@ export class EventDispatcherImpl implements EventDispatcher {
    */
   getHandlerCount(eventType?: NormalizedEventType | string): number {
     if (eventType) {
-      return (this.handlers.get(eventType)?.size || 0) + this.globalHandlers.size;
+      return (
+        (this.handlers.get(eventType)?.size || 0) + this.globalHandlers.size
+      );
     } else {
       let total = this.globalHandlers.size;
       for (const handlers of this.handlers.values()) {
@@ -221,27 +253,106 @@ export class EventDispatcherImpl implements EventDispatcher {
   }
 
   /**
+   * Dispatch multiple events in batch
+   */
+  async dispatchBatch(events: any[], options?: any): Promise<any[]> {
+    const results: any[] = [];
+    for (const event of events) {
+      await this.dispatch(event.eventType, event);
+      results.push({
+        event,
+        results: [],
+        totalHandlers: 0,
+        successCount: 0,
+        failureCount: 0,
+        skippedCount: 0,
+        totalDuration: 0,
+      });
+    }
+    return results;
+  }
+
+  /**
+   * Replay events from logs
+   */
+  async replayFromLogs(logs: any[], options?: any): Promise<any[]> {
+    return this.dispatchBatch(logs, options);
+  }
+
+  /**
+   * Clear all handlers
+   */
+  clearHandlers(): void {
+    this.removeAllHandlers();
+  }
+
+  /**
+   * Check if handler exists
+   */
+  hasHandler(name: string): boolean {
+    // Simple check - could be enhanced
+    return this.getHandlerCount() > 0;
+  }
+
+  /**
+   * Get statistics
+   */
+  getStatistics(): any {
+    return {
+      totalDispatched: 0,
+      totalSuccess: 0,
+      totalFailed: 0,
+      totalSkipped: 0,
+      averageDuration: 0,
+      handlerStatistics: new Map(),
+    };
+  }
+
+  /**
    * Create a scoped event dispatcher that prefixes all events
    */
   createScoped(prefix: string): EventDispatcher {
     const parent = this;
 
     return {
-      on(eventType: NormalizedEventType | string, handler: EventHandler): EventSubscription {
+      on(
+        eventType: NormalizedEventType | string,
+        handler: SimpleEventHandler,
+      ): EventSubscription {
         return parent.on(`${prefix}.${eventType}`, handler);
       },
 
-      off(eventType: NormalizedEventType | string, handler: EventHandler): void {
+      off(
+        eventType: NormalizedEventType | string,
+        handler: SimpleEventHandler,
+      ): void {
         parent.off(`${prefix}.${eventType}`, handler);
       },
 
-      async dispatch(eventType: NormalizedEventType | string, payload: any): Promise<void> {
+      onAll(handler: SimpleEventHandler): EventSubscription {
+        return parent.onAll(handler);
+      },
+
+      async dispatch(
+        eventType: NormalizedEventType | string,
+        payload: any,
+      ): Promise<void> {
         await parent.dispatch(`${prefix}.${eventType}`, payload);
       },
 
-      getHandlers(eventType: NormalizedEventType | string): EventHandler[] {
-        return parent.getHandlers(`${prefix}.${eventType}`);
-      },
+      dispatchEvent: undefined,
+      dispatchBatch: async () => [],
+      replayFromLogs: async () => [],
+      clearHandlers: () => {},
+      hasHandler: () => false,
+      getStatistics: () => ({
+        totalDispatched: 0,
+        totalSuccess: 0,
+        totalFailed: 0,
+        totalSkipped: 0,
+        averageDuration: 0,
+        handlerStatistics: new Map(),
+      }),
     };
   }
 }

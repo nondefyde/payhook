@@ -8,7 +8,11 @@
 export { PayHookModule } from './payhook.module';
 
 // Configuration
-export { PayHookModuleConfig, PayHookModuleAsyncConfig, defaultPayHookConfig } from './payhook.config';
+export type {
+  PayHookModuleConfig,
+  PayHookModuleAsyncConfig,
+} from './payhook.config';
+export { defaultPayHookConfig } from './payhook.config';
 
 // Controllers
 export { WebhookController } from './controllers/webhook.controller';

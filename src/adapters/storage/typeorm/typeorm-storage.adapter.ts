@@ -2,14 +2,7 @@ import {
   DataSource,
   Repository,
   EntityManager,
-  QueryRunner,
   SelectQueryBuilder,
-  In,
-  IsNull,
-  Not,
-  LessThan,
-  MoreThan,
-  Between,
 } from 'typeorm';
 import {
   StorageAdapter,
@@ -30,6 +23,11 @@ import {
   AuditLogQuery,
   DispatchLogQuery,
   OutboxQuery,
+  TransactionFilter,
+  WebhookFilter,
+  UnmatchedFilter,
+  Pagination,
+  PaginatedResult,
   TransactionStatus,
   ProcessingStatus,
   Money,
@@ -214,6 +212,80 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     return await qb.getCount();
   }
 
+  async listTransactions(
+    filter: TransactionFilter,
+    pagination: Pagination,
+  ): Promise<PaginatedResult<Transaction>> {
+    const qb = this.transactionRepo.createQueryBuilder('t');
+
+    if (filter.status) {
+      qb.andWhere('t.status = :status', { status: filter.status });
+    }
+    if (filter.provider) {
+      qb.andWhere('t.provider = :provider', { provider: filter.provider });
+    }
+    if (filter.fromDate) {
+      qb.andWhere('t.created_at >= :fromDate', { fromDate: filter.fromDate });
+    }
+    if (filter.toDate) {
+      qb.andWhere('t.created_at <= :toDate', { toDate: filter.toDate });
+    }
+    if (filter.minAmount !== undefined) {
+      qb.andWhere('t.amount >= :minAmount', { minAmount: filter.minAmount });
+    }
+    if (filter.maxAmount !== undefined) {
+      qb.andWhere('t.amount <= :maxAmount', { maxAmount: filter.maxAmount });
+    }
+    if (filter.currency) {
+      qb.andWhere('t.currency = :currency', { currency: filter.currency });
+    }
+
+    const total = await qb.getCount();
+
+    qb.orderBy('t.created_at', 'DESC');
+    qb.skip((pagination.page - 1) * pagination.limit);
+    qb.take(pagination.limit);
+
+    const entities = await qb.getMany();
+    const items = entities.map((e) => this.mapTransactionEntityToDomain(e));
+
+    return {
+      items,
+      total,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(total / pagination.limit),
+    };
+  }
+
+  async findStaleTransactions(
+    olderThanMinutes: number,
+    limit?: number,
+  ): Promise<Transaction[]> {
+    const cutoffTime = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+
+    const qb = this.transactionRepo.createQueryBuilder('t');
+    qb.andWhere('t.status = :status', { status: TransactionStatus.PROCESSING });
+    qb.andWhere('t.updated_at < :cutoff', { cutoff: cutoffTime });
+    qb.orderBy('t.updated_at', 'ASC');
+
+    if (limit) {
+      qb.limit(limit);
+    }
+
+    const entities = await qb.getMany();
+    return entities.map((e) => this.mapTransactionEntityToDomain(e));
+  }
+
+  async lockTransactionForUpdate(id: string): Promise<Transaction | null> {
+    const entity = await this.transactionRepo.findOne({
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    return entity ? this.mapTransactionEntityToDomain(entity) : null;
+  }
+
   /**
    * Webhook Log Management
    */
@@ -239,15 +311,16 @@ export class TypeORMStorageAdapter implements StorageAdapter {
 
   async updateWebhookLogStatus(
     id: string,
-    status: ProcessingStatus,
-    metadata?: Record<string, any>,
-  ): Promise<void> {
+    status: any,
+    errorMessage?: string,
+  ): Promise<WebhookLog> {
     await this.webhookLogRepo.update(id, {
       processingStatus: status,
-      metadata: metadata
-        ? () => `metadata || '${JSON.stringify(metadata)}'::jsonb`
-        : undefined,
+      errorMessage: errorMessage || undefined,
     });
+
+    const entity = await this.webhookLogRepo.findOneOrFail({ where: { id } });
+    return this.mapWebhookLogEntityToDomain(entity);
   }
 
   async linkWebhookToTransaction(
@@ -257,6 +330,134 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     await this.webhookLogRepo.update(webhookLogId, {
       transactionId,
     });
+  }
+
+  async findWebhookLog(id: string): Promise<WebhookLog | null> {
+    const entity = await this.webhookLogRepo.findOne({ where: { id } });
+    return entity ? this.mapWebhookLogEntityToDomain(entity) : null;
+  }
+
+  async findWebhookLogByProviderEventId(
+    provider: string,
+    providerEventId: string,
+  ): Promise<WebhookLog | null> {
+    const entity = await this.webhookLogRepo.findOne({
+      where: {
+        provider,
+        providerEventId,
+      },
+    });
+    return entity ? this.mapWebhookLogEntityToDomain(entity) : null;
+  }
+
+  async updateWebhookLog(
+    id: string,
+    updates: Partial<WebhookLog>,
+  ): Promise<WebhookLog> {
+    const updateData: any = {};
+
+    if (updates.transactionId !== undefined) {
+      updateData.transactionId = updates.transactionId;
+    }
+    if (updates.processingStatus !== undefined) {
+      updateData.processingStatus = updates.processingStatus;
+    }
+    if (updates.errorMessage !== undefined) {
+      updateData.errorMessage = updates.errorMessage;
+    }
+    if (
+      updates.processingDurationMs !== undefined &&
+      updates.processingDurationMs !== null
+    ) {
+      updateData.processingDurationMs = updates.processingDurationMs;
+    }
+
+    await this.webhookLogRepo.update(id, updateData);
+
+    const entity = await this.webhookLogRepo.findOneOrFail({ where: { id } });
+    return this.mapWebhookLogEntityToDomain(entity);
+  }
+
+  async listUnmatchedWebhooks(
+    filter: UnmatchedFilter,
+    pagination: Pagination,
+  ): Promise<PaginatedResult<WebhookLog>> {
+    const qb = this.webhookLogRepo.createQueryBuilder('w');
+
+    // Unmatched webhooks have no transaction ID
+    qb.andWhere('w.transaction_id IS NULL');
+
+    if (filter.provider) {
+      qb.andWhere('w.provider = :provider', { provider: filter.provider });
+    }
+    if (filter.eventType) {
+      qb.andWhere('w.event_type = :eventType', { eventType: filter.eventType });
+    }
+    if (filter.fromDate) {
+      qb.andWhere('w.received_at >= :fromDate', { fromDate: filter.fromDate });
+    }
+    if (filter.toDate) {
+      qb.andWhere('w.received_at <= :toDate', { toDate: filter.toDate });
+    }
+
+    const total = await qb.getCount();
+
+    qb.orderBy('w.received_at', 'DESC');
+    qb.skip((pagination.page - 1) * pagination.limit);
+    qb.take(pagination.limit);
+
+    const entities = await qb.getMany();
+    const items = entities.map((e) => this.mapWebhookLogEntityToDomain(e));
+
+    return {
+      items,
+      total,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(total / pagination.limit),
+    };
+  }
+
+  async listWebhookLogs(
+    filter: WebhookFilter,
+    pagination: Pagination,
+  ): Promise<PaginatedResult<WebhookLog>> {
+    const qb = this.webhookLogRepo.createQueryBuilder('w');
+
+    if (filter.provider) {
+      qb.andWhere('w.provider = :provider', { provider: filter.provider });
+    }
+    if (filter.processingStatus) {
+      qb.andWhere('w.processing_status = :status', {
+        status: filter.processingStatus,
+      });
+    }
+    if (filter.transactionId) {
+      qb.andWhere('w.transaction_id = :txnId', { txnId: filter.transactionId });
+    }
+    if (filter.fromDate) {
+      qb.andWhere('w.received_at >= :fromDate', { fromDate: filter.fromDate });
+    }
+    if (filter.toDate) {
+      qb.andWhere('w.received_at <= :toDate', { toDate: filter.toDate });
+    }
+
+    const total = await qb.getCount();
+
+    qb.orderBy('w.received_at', 'DESC');
+    qb.skip((pagination.page - 1) * pagination.limit);
+    qb.take(pagination.limit);
+
+    const entities = await qb.getMany();
+    const items = entities.map((e) => this.mapWebhookLogEntityToDomain(e));
+
+    return {
+      items,
+      total,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(total / pagination.limit),
+    };
   }
 
   async findWebhookLogs(query: WebhookQuery): Promise<WebhookLog[]> {
@@ -319,31 +520,80 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     return this.mapAuditLogEntityToDomain(saved);
   }
 
-  async getAuditLogs(query: AuditLogQuery): Promise<AuditLog[]> {
+  async getAuditLogs(transactionId: string): Promise<AuditLog[]>;
+  async getAuditLogs(query: AuditLogQuery): Promise<AuditLog[]>;
+  async getAuditLogs(
+    transactionIdOrQuery: string | AuditLogQuery,
+  ): Promise<AuditLog[]> {
     const qb = this.auditLogRepo.createQueryBuilder('a');
 
-    if (query.transactionId) {
-      qb.andWhere('a.transaction_id = :txnId', { txnId: query.transactionId });
-    }
-    if (query.action) {
-      qb.andWhere('a.action = :action', { action: query.action });
-    }
-    if (query.performedBy) {
-      qb.andWhere('a.performed_by = :by', { by: query.performedBy });
-    }
-    if (query.performedAfter) {
-      qb.andWhere('a.performed_at > :after', { after: query.performedAfter });
-    }
-    if (query.performedBefore) {
-      qb.andWhere('a.performed_at < :before', {
-        before: query.performedBefore,
-      });
+    // Handle both string (transactionId) and AuditLogQuery
+    if (typeof transactionIdOrQuery === 'string') {
+      qb.andWhere('a.transaction_id = :txnId', { txnId: transactionIdOrQuery });
+    } else {
+      const query = transactionIdOrQuery;
+      if (query.transactionId) {
+        qb.andWhere('a.transaction_id = :txnId', {
+          txnId: query.transactionId,
+        });
+      }
+      if (query.action) {
+        qb.andWhere('a.action = :action', { action: query.action });
+      }
+      if (query.performedBy) {
+        qb.andWhere('a.performed_by = :by', { by: query.performedBy });
+      }
+      if (query.performedAfter) {
+        qb.andWhere('a.performed_at > :after', { after: query.performedAfter });
+      }
+      if (query.performedBefore) {
+        qb.andWhere('a.performed_at < :before', {
+          before: query.performedBefore,
+        });
+      }
     }
 
     qb.orderBy('a.performed_at', 'ASC');
 
     const entities = await qb.getMany();
     return entities.map((e) => this.mapAuditLogEntityToDomain(e));
+  }
+
+  async getAuditTrail(transactionId: string): Promise<AuditLog[]> {
+    const qb = this.auditLogRepo.createQueryBuilder('a');
+    qb.andWhere('a.transaction_id = :txnId', { txnId: transactionId });
+    qb.orderBy('a.performed_at', 'ASC');
+
+    const entities = await qb.getMany();
+    return entities.map((e) => this.mapAuditLogEntityToDomain(e));
+  }
+
+  async listAuditLogs(
+    fromDate: Date,
+    toDate: Date,
+    pagination: Pagination,
+  ): Promise<PaginatedResult<AuditLog>> {
+    const qb = this.auditLogRepo.createQueryBuilder('a');
+
+    qb.andWhere('a.created_at >= :fromDate', { fromDate });
+    qb.andWhere('a.created_at <= :toDate', { toDate });
+
+    const total = await qb.getCount();
+
+    qb.orderBy('a.created_at', 'DESC');
+    qb.skip((pagination.page - 1) * pagination.limit);
+    qb.take(pagination.limit);
+
+    const entities = await qb.getMany();
+    const items = entities.map((e) => this.mapAuditLogEntityToDomain(e));
+
+    return {
+      items,
+      total,
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(total / pagination.limit),
+    };
   }
 
   /**
@@ -356,7 +606,7 @@ export class TypeORMStorageAdapter implements StorageAdapter {
       transactionId: dto.transactionId,
       eventType: dto.eventType,
       handlerName: dto.handlerName,
-      status: dto.status,
+      status: dto.status as any, // Cast to DispatchStatus enum
       attemptedAt: dto.attemptedAt,
       completedAt: dto.completedAt,
       durationMs: dto.durationMs,
@@ -370,20 +620,57 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     return this.mapDispatchLogEntityToDomain(saved);
   }
 
-  async getDispatchLogs(query: DispatchLogQuery): Promise<DispatchLog[]> {
+  async getDispatchLogs(transactionId: string): Promise<DispatchLog[]>;
+  async getDispatchLogs(query: DispatchLogQuery): Promise<DispatchLog[]>;
+  async getDispatchLogs(
+    transactionIdOrQuery: string | DispatchLogQuery,
+  ): Promise<DispatchLog[]> {
     const qb = this.dispatchLogRepo.createQueryBuilder('d');
 
-    if (query.webhookLogId) {
-      qb.andWhere('d.webhook_log_id = :wId', { wId: query.webhookLogId });
-    }
-    if (query.transactionId) {
-      qb.andWhere('d.transaction_id = :tId', { tId: query.transactionId });
-    }
-    if (query.status) {
-      qb.andWhere('d.status = :status', { status: query.status });
+    // Handle both string (transactionId) and DispatchLogQuery
+    if (typeof transactionIdOrQuery === 'string') {
+      qb.andWhere('d.transaction_id = :tId', { tId: transactionIdOrQuery });
+    } else {
+      const query = transactionIdOrQuery;
+      if (query.webhookLogId) {
+        qb.andWhere('d.webhook_log_id = :wId', { wId: query.webhookLogId });
+      }
+      if (query.transactionId) {
+        qb.andWhere('d.transaction_id = :tId', { tId: query.transactionId });
+      }
+      if (query.status) {
+        qb.andWhere('d.status = :status', { status: query.status });
+      }
     }
 
     qb.orderBy('d.attempted_at', 'DESC');
+
+    const entities = await qb.getMany();
+    return entities.map((e) => this.mapDispatchLogEntityToDomain(e));
+  }
+
+  async findFailedDispatches(
+    limit?: number,
+    maxRetries?: number,
+  ): Promise<DispatchLog[]> {
+    const qb = this.dispatchLogRepo.createQueryBuilder('d');
+
+    qb.andWhere('d.status = :status', { status: 'failed' });
+
+    if (maxRetries !== undefined) {
+      qb.andWhere('d.retry_count < :maxRetries', { maxRetries });
+    }
+
+    // Only get dispatches that are ready for retry
+    qb.andWhere('(d.next_retry_at IS NULL OR d.next_retry_at <= :now)', {
+      now: new Date(),
+    });
+
+    qb.orderBy('d.attempted_at', 'ASC');
+
+    if (limit) {
+      qb.limit(limit);
+    }
 
     const entities = await qb.getMany();
     return entities.map((e) => this.mapDispatchLogEntityToDomain(e));
@@ -430,14 +717,20 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     return entities.map((e) => this.mapOutboxEventEntityToDomain(e));
   }
 
-  async markOutboxEventProcessed(id: string): Promise<void> {
+  async markOutboxEventProcessed(id: string): Promise<OutboxEvent> {
     await this.outboxEventRepo.update(id, {
       status: 'delivered',
       processedAt: new Date(),
     });
+
+    const entity = await this.outboxEventRepo.findOneOrFail({ where: { id } });
+    return this.mapOutboxEventEntityToDomain(entity);
   }
 
-  async markOutboxEventFailed(id: string, error: string): Promise<void> {
+  async markOutboxEventFailed(
+    id: string,
+    errorMessage: string,
+  ): Promise<OutboxEvent> {
     const entity = await this.outboxEventRepo.findOneOrFail({ where: { id } });
 
     const retryCount = entity.retryCount + 1;
@@ -449,14 +742,107 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     await this.outboxEventRepo.update(id, {
       status,
       retryCount,
-      error,
+      error: errorMessage,
       scheduledFor: status === 'failed' ? nextRetry : undefined,
     });
+
+    const updated = await this.outboxEventRepo.findOneOrFail({ where: { id } });
+    return this.mapOutboxEventEntityToDomain(updated);
+  }
+
+  async listPendingOutboxEvents(limit?: number): Promise<OutboxEvent[]> {
+    const qb = this.outboxEventRepo.createQueryBuilder('o');
+
+    qb.andWhere('o.status = :status', { status: 'pending' });
+    qb.andWhere('o.scheduled_for <= :now', { now: new Date() });
+    qb.orderBy('o.scheduled_for', 'ASC');
+
+    if (limit) {
+      qb.limit(limit);
+    }
+
+    const entities = await qb.getMany();
+    return entities.map((e) => this.mapOutboxEventEntityToDomain(e));
+  }
+
+  async findStaleOutboxEvents(
+    olderThanMinutes: number,
+    limit?: number,
+  ): Promise<OutboxEvent[]> {
+    const cutoffTime = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+
+    const qb = this.outboxEventRepo.createQueryBuilder('o');
+    qb.andWhere('o.status IN (:...statuses)', {
+      statuses: ['pending', 'failed'],
+    });
+    qb.andWhere('o.created_at < :cutoff', { cutoff: cutoffTime });
+    qb.orderBy('o.created_at', 'ASC');
+
+    if (limit) {
+      qb.limit(limit);
+    }
+
+    const entities = await qb.getMany();
+    return entities.map((e) => this.mapOutboxEventEntityToDomain(e));
+  }
+
+  /**
+   * Retention & Cleanup
+   */
+
+  async purgeExpiredWebhookLogs(olderThan: Date): Promise<number> {
+    const result = await this.webhookLogRepo
+      .createQueryBuilder()
+      .delete()
+      .where('received_at < :olderThan', { olderThan })
+      .execute();
+
+    return result.affected || 0;
+  }
+
+  async purgeExpiredDispatchLogs(olderThan: Date): Promise<number> {
+    const result = await this.dispatchLogRepo
+      .createQueryBuilder()
+      .delete()
+      .where('created_at < :olderThan', { olderThan })
+      .execute();
+
+    return result.affected || 0;
+  }
+
+  async purgeProcessedOutboxEvents(olderThan: Date): Promise<number> {
+    const result = await this.outboxEventRepo
+      .createQueryBuilder()
+      .delete()
+      .where('status = :status', { status: 'delivered' })
+      .andWhere('processed_at < :olderThan', { olderThan })
+      .execute();
+
+    return result.affected || 0;
   }
 
   /**
    * Transaction Support
    */
+
+  async beginTransaction(): Promise<any> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    return queryRunner;
+  }
+
+  async commitTransaction(txn: any): Promise<void> {
+    const queryRunner = txn;
+    await queryRunner.commitTransaction();
+    await queryRunner.release();
+  }
+
+  async rollbackTransaction(txn: any): Promise<void> {
+    const queryRunner = txn;
+    await queryRunner.rollbackTransaction();
+    await queryRunner.release();
+  }
 
   async withTransaction<T>(
     callback: (manager: EntityManager) => Promise<T>,
@@ -491,21 +877,32 @@ export class TypeORMStorageAdapter implements StorageAdapter {
   }
 
   async getStatistics(): Promise<{
-    totalTransactions: number;
-    totalWebhooks: number;
-    totalAuditLogs: number;
+    transactionCount: number;
+    webhookLogCount: number;
+    auditLogCount: number;
+    dispatchLogCount: number;
+    outboxEventCount: number;
   }> {
-    const [totalTransactions, totalWebhooks, totalAuditLogs] =
-      await Promise.all([
-        this.transactionRepo.count(),
-        this.webhookLogRepo.count(),
-        this.auditLogRepo.count(),
-      ]);
+    const [
+      transactionCount,
+      webhookLogCount,
+      auditLogCount,
+      dispatchLogCount,
+      outboxEventCount,
+    ] = await Promise.all([
+      this.transactionRepo.count(),
+      this.webhookLogRepo.count(),
+      this.auditLogRepo.count(),
+      this.dispatchLogRepo.count(),
+      this.outboxEventRepo.count(),
+    ]);
 
     return {
-      totalTransactions,
-      totalWebhooks,
-      totalAuditLogs,
+      transactionCount,
+      webhookLogCount,
+      auditLogCount,
+      dispatchLogCount,
+      outboxEventCount,
     };
   }
 
@@ -529,20 +926,30 @@ export class TypeORMStorageAdapter implements StorageAdapter {
   }
 
   private mapWebhookLogEntityToDomain(entity: WebhookLogEntity): WebhookLog {
+    // Convert Buffer to Record<string, any> if needed
+    let rawPayload: Record<string, any> = {};
+    if (entity.rawPayload) {
+      try {
+        rawPayload = JSON.parse(entity.rawPayload.toString());
+      } catch {
+        rawPayload = { raw: entity.rawPayload.toString() };
+      }
+    }
+
     return new WebhookLog(
       entity.id,
       entity.provider,
-      entity.eventType,
       entity.providerEventId,
-      entity.rawPayload,
-      entity.headers,
+      entity.eventType,
+      rawPayload,
       entity.signatureValid,
       entity.processingStatus,
-      entity.processingDurationMs || 0,
       entity.receivedAt,
       entity.transactionId,
-      entity.metadata,
-      entity.createdAt,
+      entity.metadata?.normalizedEvent || null, // Extract normalized event from metadata
+      entity.errorMessage || null,
+      entity.headers,
+      entity.processingDurationMs || null,
     );
   }
 
@@ -550,51 +957,57 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     return new AuditLog(
       entity.id,
       entity.transactionId,
-      entity.action,
-      entity.performedBy,
-      entity.performedAt,
-      entity.stateBefore,
-      entity.stateAfter,
-      entity.metadata,
+      entity.fromStatus,
+      entity.toStatus,
+      entity.triggerType,
       entity.createdAt,
+      entity.webhookLogId,
+      entity.reconciliationResult,
+      entity.verificationMethod,
+      entity.metadata,
+      entity.actor,
+      entity.reason,
     );
   }
 
   private mapDispatchLogEntityToDomain(entity: DispatchLogEntity): DispatchLog {
     return new DispatchLog(
       entity.id,
-      entity.webhookLogId,
-      entity.transactionId,
-      entity.eventType,
+      entity.transactionId || '',
+      entity.eventType as any,
       entity.handlerName,
       entity.status,
+      entity.metadata?.isReplay || false, // Extract isReplay from metadata
       entity.attemptedAt,
-      entity.completedAt || undefined,
-      entity.durationMs || undefined,
-      entity.error || undefined,
+      entity.error || null,
+      entity.durationMs || null,
+      entity.metadata?.payload || {}, // Extract payload from metadata
       entity.retryCount,
-      entity.nextRetryAt || undefined,
       entity.metadata,
-      entity.createdAt,
     );
   }
 
   private mapOutboxEventEntityToDomain(entity: OutboxEventEntity): OutboxEvent {
+    // Map from entity status string to OutboxStatus enum
+    let status: any = 'pending';
+    if (entity.status === 'delivered') {
+      status = 'processed';
+    } else if (entity.status === 'failed' || entity.status === 'dead_letter') {
+      status = 'failed';
+    }
+
     return new OutboxEvent(
       entity.id,
-      entity.eventType,
-      entity.aggregateId,
-      entity.aggregateType,
+      entity.aggregateId, // transactionId
+      entity.eventType as any,
       entity.payload,
-      entity.status as any,
-      entity.retryCount,
-      entity.maxRetries,
-      entity.scheduledFor,
-      entity.processedAt || undefined,
-      entity.error || undefined,
-      entity.metadata,
+      status,
       entity.createdAt,
-      entity.updatedAt,
+      entity.processedAt || null,
+      entity.retryCount,
+      entity.scheduledFor, // lastAttemptAt
+      entity.error || null,
+      entity.metadata,
     );
   }
 

@@ -80,15 +80,17 @@ describe('PaystackProviderAdapter', () => {
 
   describe('Payload Parsing', () => {
     it('should parse valid Paystack webhook payload', () => {
-      const payload = Buffer.from(JSON.stringify({
-        event: 'charge.success',
-        data: {
-          id: 123456789,
-          reference: 'ref_test_123',
-          amount: 10000,
-          currency: 'NGN',
-        },
-      }));
+      const payload = Buffer.from(
+        JSON.stringify({
+          event: 'charge.success',
+          data: {
+            id: 123456789,
+            reference: 'ref_test_123',
+            amount: 10000,
+            currency: 'NGN',
+          },
+        }),
+      );
 
       const parsed = adapter.parsePayload(payload);
 
@@ -100,15 +102,21 @@ describe('PaystackProviderAdapter', () => {
     it('should throw error for invalid JSON', () => {
       const payload = Buffer.from('not a json');
 
-      expect(() => adapter.parsePayload(payload)).toThrow('Failed to parse Paystack payload');
+      expect(() => adapter.parsePayload(payload)).toThrow(
+        'Failed to parse Paystack payload',
+      );
     });
 
     it('should throw error for missing event field', () => {
-      const payload = Buffer.from(JSON.stringify({
-        data: { id: 123 },
-      }));
+      const payload = Buffer.from(
+        JSON.stringify({
+          data: { id: 123 },
+        }),
+      );
 
-      expect(() => adapter.parsePayload(payload)).toThrow('Invalid Paystack webhook structure');
+      expect(() => adapter.parsePayload(payload)).toThrow(
+        'Invalid Paystack webhook structure',
+      );
     });
   });
 
@@ -144,9 +152,9 @@ describe('PaystackProviderAdapter', () => {
       expect(normalized.currency).toBe('NGN');
       expect(normalized.providerRef).toBe('ref_test_123');
       expect(normalized.applicationRef).toBe('order_123');
-      expect(normalized.customer?.email).toBe('user@example.com');
-      expect(normalized.customer?.name).toBe('John Doe');
-      expect(normalized.metadata.custom_field).toBe('value');
+      expect(normalized.customerEmail).toBe('user@example.com');
+      expect(normalized.providerMetadata?.customer?.name).toBe('John Doe');
+      expect(normalized.providerMetadata?.metadata?.custom_field).toBe('value');
     });
 
     it('should normalize refund.processed event', () => {
@@ -341,13 +349,13 @@ describe('PaystackProviderAdapter', () => {
 
       const normalized = adapter.normalize(rawPayload);
 
-      expect(normalized.metadata.gateway_response).toBe('Successful');
-      expect(normalized.metadata.channel).toBe('card');
-      expect(normalized.metadata.ip_address).toBe('192.168.1.1');
-      expect(normalized.metadata.fees).toBe(150);
-      expect(normalized.metadata.authorization?.card_type).toBe('visa');
-      expect(normalized.metadata.authorization?.last4).toBe('1234');
-      expect(normalized.metadata.custom_field).toBe('value');
+      expect(normalized.providerMetadata?.gateway_response).toBe('Successful');
+      expect(normalized.providerMetadata?.channel).toBe('card');
+      expect(normalized.providerMetadata?.ip_address).toBe('192.168.1.1');
+      expect(normalized.providerMetadata?.fees).toBe(150);
+      expect(normalized.providerMetadata?.authorization?.card_type).toBe('visa');
+      expect(normalized.providerMetadata?.authorization?.last4).toBe('1234');
+      expect(normalized.providerMetadata?.custom_field).toBe('value');
     });
   });
 });

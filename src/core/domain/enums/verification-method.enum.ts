@@ -16,6 +16,12 @@ export enum VerificationMethod {
   API_VERIFIED = 'api_verified',
 
   /**
+   * State verified by both webhook and API
+   * Highest confidence
+   */
+  WEBHOOK_AND_API = 'webhook_and_api',
+
+  /**
    * State confirmed or advanced via reconciliation flow
    * High confidence
    */

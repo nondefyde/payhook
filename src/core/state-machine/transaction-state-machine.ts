@@ -1,5 +1,9 @@
 import { Transaction } from '../domain/models';
-import { TransactionStatus, TriggerType, NormalizedEventType } from '../domain/enums';
+import {
+  TransactionStatus,
+  TriggerType,
+  NormalizedEventType,
+} from '../domain/enums';
 import {
   StateTransition,
   TransitionContext,
@@ -111,7 +115,11 @@ export class TransactionStateMachine {
     }
 
     // Evaluate conditions
-    const conditionResults = await this.evaluateConditions(from, to, fullContext);
+    const conditionResults = await this.evaluateConditions(
+      from,
+      to,
+      fullContext,
+    );
     if (!conditionResults.success) {
       return conditionResults;
     }
@@ -300,7 +308,9 @@ export class TransactionStateMachine {
       try {
         const result = await guard.check(context);
         if (!result.allowed) {
-          failures.push(result.reason || `Guard ${guard.name} blocked transition`);
+          failures.push(
+            result.reason || `Guard ${guard.name} blocked transition`,
+          );
         }
       } catch (error) {
         failures.push(

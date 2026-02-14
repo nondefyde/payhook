@@ -6,6 +6,9 @@ import {
   ProcessingStatus,
   AuditAction,
   DispatchStatus,
+  OutboxStatus,
+  TriggerType,
+  NormalizedEventType,
 } from '../../src';
 
 describe('TypeORM Storage Adapter Integration Tests', () => {
@@ -71,7 +74,7 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
           provider: 'mock',
           amount: 3000,
           currency: 'USD',
-        })
+        }),
       ).rejects.toThrow();
     });
 
@@ -88,11 +91,10 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
         TransactionStatus.PROCESSING,
         {
           transactionId: transaction.id,
-          action: AuditAction.WEBHOOK_STATE_TRANSITION,
-          performedBy: 'system',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PENDING,
-          stateAfter: TransactionStatus.PROCESSING,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.PROCESSING,
+          triggerType: TriggerType.WEBHOOK,
+          actor: 'system',
           metadata: { reason: 'Payment initiated' },
         },
       );
@@ -100,13 +102,11 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       expect(updated.status).toBe(TransactionStatus.PROCESSING);
 
       // Verify audit log was created
-      const auditLogs = await adapter.getAuditLogs({
-        transactionId: transaction.id,
-      });
+      const auditLogs = await adapter.getAuditLogs(transaction.id);
       expect(auditLogs).toHaveLength(1);
-      expect(auditLogs[0].action).toBe(AuditAction.WEBHOOK_STATE_TRANSITION);
-      expect(auditLogs[0].stateBefore).toBe(TransactionStatus.PENDING);
-      expect(auditLogs[0].stateAfter).toBe(TransactionStatus.PROCESSING);
+      expect(auditLogs[0].triggerType).toBe(TriggerType.WEBHOOK);
+      expect(auditLogs[0].fromStatus).toBe(TransactionStatus.PENDING);
+      expect(auditLogs[0].toStatus).toBe(TransactionStatus.PROCESSING);
     });
 
     it('should handle concurrent updates with pessimistic locking', async () => {
@@ -124,11 +124,10 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
           TransactionStatus.SUCCESSFUL,
           {
             transactionId: transaction.id,
-            action: AuditAction.WEBHOOK_STATE_TRANSITION,
-            performedBy: 'system',
-            performedAt: new Date(),
-            stateBefore: TransactionStatus.PENDING,
-            stateAfter: TransactionStatus.SUCCESSFUL,
+            fromStatus: TransactionStatus.PENDING,
+            toStatus: TransactionStatus.SUCCESSFUL,
+            triggerType: TriggerType.WEBHOOK,
+            actor: 'system',
           },
         ),
         adapter.updateTransactionStatus(
@@ -136,11 +135,10 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
           TransactionStatus.FAILED,
           {
             transactionId: transaction.id,
-            action: AuditAction.WEBHOOK_STATE_TRANSITION,
-            performedBy: 'system',
-            performedAt: new Date(),
-            stateBefore: TransactionStatus.PENDING,
-            stateAfter: TransactionStatus.FAILED,
+            fromStatus: TransactionStatus.PENDING,
+            toStatus: TransactionStatus.FAILED,
+            triggerType: TriggerType.WEBHOOK,
+            actor: 'system',
           },
         ),
       ];
@@ -148,12 +146,17 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       const results = await Promise.allSettled(promises);
 
       // One should succeed, one should fail or have different result
-      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const successCount = results.filter(
+        (r) => r.status === 'fulfilled',
+      ).length;
       expect(successCount).toBeGreaterThanOrEqual(1);
 
       // Check final state - should be one of the two
       const final = await adapter.findTransaction({ id: transaction.id });
-      expect([TransactionStatus.SUCCESSFUL, TransactionStatus.FAILED]).toContain(final?.status);
+      expect([
+        TransactionStatus.SUCCESSFUL,
+        TransactionStatus.FAILED,
+      ]).toContain(final?.status);
     });
 
     it('should find transactions by various queries', async () => {
@@ -177,11 +180,10 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
         { providerRef: 'stripe_ref_123' },
         {
           transactionId: txn2.id,
-          action: AuditAction.MANUAL_TRANSITION,
-          performedBy: 'test',
-          performedAt: new Date(),
-          stateBefore: TransactionStatus.PENDING,
-          stateAfter: TransactionStatus.PROCESSING,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.PROCESSING,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
         },
       );
 
@@ -204,7 +206,9 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       expect(byProviderRef?.id).toBe(txn2.id);
 
       // Count transactions
-      const count = await adapter.countTransactions({ status: TransactionStatus.PENDING });
+      const count = await adapter.countTransactions({
+        status: TransactionStatus.PENDING,
+      });
       expect(count).toBe(1); // Only txn1 is still pending
     });
   });
@@ -222,7 +226,7 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
         provider: 'mock',
         eventType: 'payment.success',
         providerEventId: 'evt_123',
-        rawPayload: Buffer.from(JSON.stringify({ test: true })),
+        rawPayload: { test: true },
         headers: { 'x-signature': 'test-sig' },
         signatureValid: true,
         processingStatus: ProcessingStatus.PROCESSED,
@@ -246,7 +250,7 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       await adapter.updateWebhookLogStatus(
         webhookLog.id,
         ProcessingStatus.DUPLICATE,
-        { duplicateOf: 'evt_000' },
+        'Duplicate of evt_000',
       );
 
       const updated = await adapter.findWebhookLogs({ id: webhookLog.id });
@@ -261,6 +265,8 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
         signatureValid: true,
         processingStatus: ProcessingStatus.PROCESSED,
         receivedAt: new Date(),
+        rawPayload: {},
+        headers: {},
       });
 
       await expect(
@@ -271,7 +277,9 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
           signatureValid: true,
           processingStatus: ProcessingStatus.PROCESSED,
           receivedAt: new Date(),
-        })
+          rawPayload: {},
+          headers: {},
+        }),
       ).rejects.toThrow();
     });
   });
@@ -279,7 +287,8 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
   describe('Outbox Event Operations', () => {
     it('should create and process outbox events', async () => {
       const outboxEvent = await adapter.createOutboxEvent({
-        eventType: 'payment.succeeded',
+        eventType: NormalizedEventType.PAYMENT_SUCCEEDED,
+        transactionId: 'txn_123',
         aggregateId: 'txn_123',
         aggregateType: 'transaction',
         payload: { amount: 1000, currency: 'USD' },
@@ -287,11 +296,11 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       });
 
       expect(outboxEvent).toBeDefined();
-      expect(outboxEvent.status).toBe('pending');
+      expect(outboxEvent.status).toBe(OutboxStatus.PENDING);
 
       // Get pending events
       const pending = await adapter.getOutboxEvents({
-        status: 'pending',
+        status: OutboxStatus.PENDING,
         scheduledBefore: new Date(Date.now() + 60000),
       });
       expect(pending).toHaveLength(1);
@@ -301,14 +310,15 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       await adapter.markOutboxEventProcessed(outboxEvent.id);
 
       const processed = await adapter.getOutboxEvents({
-        status: 'delivered',
+        status: OutboxStatus.PROCESSED,
       });
       expect(processed).toHaveLength(1);
     });
 
     it('should handle outbox event failures with retry', async () => {
       const outboxEvent = await adapter.createOutboxEvent({
-        eventType: 'payment.failed',
+        eventType: NormalizedEventType.PAYMENT_FAILED,
+        transactionId: 'txn_fail',
         aggregateId: 'txn_fail',
         aggregateType: 'transaction',
         payload: { error: 'Insufficient funds' },
@@ -318,19 +328,19 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       await adapter.markOutboxEventFailed(outboxEvent.id, 'Handler error');
 
       const failed = await adapter.getOutboxEvents({
-        status: 'failed',
+        status: OutboxStatus.FAILED,
       });
       expect(failed).toHaveLength(1);
-      expect(failed[0].retryCount).toBe(1);
+      expect(failed[0].attemptCount).toBe(1);
 
       // Simulate max retries exceeded
       await adapter.markOutboxEventFailed(outboxEvent.id, 'Handler error');
       await adapter.markOutboxEventFailed(outboxEvent.id, 'Handler error');
 
-      const deadLetter = await adapter.getOutboxEvents({
-        status: 'dead_letter',
+      const maxRetriesFailed = await adapter.getOutboxEvents({
+        status: OutboxStatus.FAILED,
       });
-      expect(deadLetter).toHaveLength(1);
+      expect(maxRetriesFailed).toHaveLength(1);
     });
   });
 
@@ -345,15 +355,19 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
 
       try {
         await adapter.withTransaction(async (manager) => {
-          // This should work
-          await manager.save('AuditLogEntity', {
-            transactionId: transaction.id,
-            action: AuditAction.MANUAL_TRANSITION,
-            performedBy: 'test',
-            performedAt: new Date(),
-            stateBefore: TransactionStatus.PENDING,
-            stateAfter: TransactionStatus.PROCESSING,
-          });
+          // This should work - using raw SQL for transaction test
+          await manager.query(
+            `INSERT INTO audit_logs (transaction_id, from_status, to_status, trigger_type, actor, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              transaction.id,
+              TransactionStatus.PENDING,
+              TransactionStatus.PROCESSING,
+              TriggerType.MANUAL,
+              'test',
+              new Date(),
+            ],
+          );
 
           // This should cause an error
           throw new Error('Simulated error');
@@ -363,9 +377,7 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
       }
 
       // Verify audit log was not saved (rolled back)
-      const auditLogs = await adapter.getAuditLogs({
-        transactionId: transaction.id,
-      });
+      const auditLogs = await adapter.getAuditLogs(transaction.id);
       expect(auditLogs).toHaveLength(0);
     });
   });
@@ -392,12 +404,14 @@ describe('TypeORM Storage Adapter Integration Tests', () => {
         signatureValid: true,
         processingStatus: ProcessingStatus.PROCESSED,
         receivedAt: new Date(),
+        rawPayload: {},
+        headers: {},
       });
 
       const stats = await adapter.getStatistics();
-      expect(stats.totalTransactions).toBe(1);
-      expect(stats.totalWebhooks).toBe(1);
-      expect(stats.totalAuditLogs).toBe(0);
+      expect(stats.transactionCount).toBe(1);
+      expect(stats.webhookLogCount).toBe(1);
+      expect(stats.auditLogCount).toBe(0);
     });
   });
 });

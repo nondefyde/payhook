@@ -76,10 +76,7 @@ export const TRANSITION_RULES: StateTransition[] = [
   {
     from: TransactionStatus.PROCESSING,
     to: TransactionStatus.ABANDONED,
-    triggers: [
-      TriggerType.MANUAL,
-      TriggerType.RECONCILIATION,
-    ],
+    triggers: [TriggerType.MANUAL, TriggerType.RECONCILIATION],
     metadata: {
       description: 'Transaction abandoned due to timeout',
       terminal: true,
@@ -228,15 +225,19 @@ export const TRANSITION_RULES: StateTransition[] = [
 /**
  * Get all valid transitions from a given status
  */
-export function getValidTransitionsFrom(status: TransactionStatus): StateTransition[] {
-  return TRANSITION_RULES.filter(rule => rule.from === status);
+export function getValidTransitionsFrom(
+  status: TransactionStatus,
+): StateTransition[] {
+  return TRANSITION_RULES.filter((rule) => rule.from === status);
 }
 
 /**
  * Get all valid target states from a given status
  */
-export function getValidTargetStates(status: TransactionStatus): TransactionStatus[] {
-  return getValidTransitionsFrom(status).map(rule => rule.to);
+export function getValidTargetStates(
+  status: TransactionStatus,
+): TransactionStatus[] {
+  return getValidTransitionsFrom(status).map((rule) => rule.to);
 }
 
 /**
@@ -246,7 +247,7 @@ export function findTransitionRule(
   from: TransactionStatus,
   to: TransactionStatus,
 ): StateTransition | undefined {
-  return TRANSITION_RULES.find(rule => rule.from === from && rule.to === to);
+  return TRANSITION_RULES.find((rule) => rule.from === from && rule.to === to);
 }
 
 /**
