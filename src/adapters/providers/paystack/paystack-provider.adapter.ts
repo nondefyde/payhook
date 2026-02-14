@@ -5,18 +5,81 @@ import {
   NormalizedEventType,
   ProviderVerificationResult,
   VerifyOptions,
+  ProviderConfig,
+  ProviderApiCredentials,
 } from '../../../core';
 
 /**
  * Paystack Provider Adapter
  *
  * Handles Paystack webhook signature verification and event normalization.
- * Paystack uses HMAC-SHA512 for webhook signatures.
+ *
+ * Authentication:
+ * - Webhook Signature: HMAC-SHA512 using secret key
+ * - API Calls: Bearer token using secret key
+ *
+ * Note: Paystack uses the same secret key for both webhook signatures
+ * and API authentication, unlike some other providers.
  *
  * @see https://paystack.com/docs/payments/webhooks
+ * @see https://paystack.com/docs/api/
  */
 export class PaystackProviderAdapter implements PaymentProviderAdapter {
   readonly providerName = 'paystack';
+  readonly config: ProviderConfig;
+  private readonly secretKey?: string;
+  private readonly publicKey?: string;
+  private readonly webhookSecrets: string[];
+
+  constructor(config?: {
+    keys?: {
+      secretKey: string;
+      publicKey?: string;
+      webhookSecret?: string | string[];
+      previousKeys?: {
+        secretKey?: string;
+        webhookSecret?: string | string[];
+      };
+    };
+    options?: ProviderConfig;
+  }) {
+    this.secretKey = config?.keys?.secretKey;
+    this.publicKey = config?.keys?.publicKey;
+
+    // For Paystack, webhook secret is the same as secret key if not explicitly provided
+    const webhookSecrets: string[] = [];
+
+    // Add current webhook secret(s) or fall back to secret key
+    if (config?.keys?.webhookSecret) {
+      const secrets = Array.isArray(config.keys.webhookSecret)
+        ? config.keys.webhookSecret
+        : [config.keys.webhookSecret];
+      webhookSecrets.push(...secrets);
+    } else if (config?.keys?.secretKey) {
+      // Paystack pattern: use secret key for webhooks
+      webhookSecrets.push(config.keys.secretKey);
+    }
+
+    // Add previous keys for rotation support
+    if (config?.keys?.previousKeys?.webhookSecret) {
+      const prevSecrets = Array.isArray(config.keys.previousKeys.webhookSecret)
+        ? config.keys.previousKeys.webhookSecret
+        : [config.keys.previousKeys.webhookSecret];
+      webhookSecrets.push(...prevSecrets);
+    } else if (config?.keys?.previousKeys?.secretKey) {
+      webhookSecrets.push(config.keys.previousKeys.secretKey);
+    }
+
+    this.webhookSecrets = webhookSecrets.filter(Boolean);
+
+    this.config = {
+      apiBaseUrl: config?.options?.apiUrl || 'https://api.paystack.co',
+      webhookPath: '/webhooks/paystack',
+      timeout: config?.options?.apiTimeout || 30000,
+      testMode: config?.options?.testMode ?? this.isTestKey(this.secretKey),
+      ...config?.options,
+    };
+  }
 
   readonly supportedEvents = [
     'charge.success',
@@ -42,21 +105,39 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
   ];
 
   /**
+   * Check if key is a test key
+   */
+  private isTestKey(key?: string): boolean {
+    if (!key) return false;
+    return key.startsWith('sk_test_') || key.startsWith('pk_test_');
+  }
+
+  /**
    * Verify webhook signature using HMAC-SHA512
    * Paystack sends signature in 'x-paystack-signature' header
+   *
+   * Note: For Paystack, the webhook secret is the same as the secret key
    */
   verifySignature(
     rawBody: Buffer,
     headers: Record<string, string>,
-    secrets: string[],
+    secrets?: string[], // Optional, uses internal webhookSecrets if not provided
   ): boolean {
     const signature = headers['x-paystack-signature'];
     if (!signature) {
       return false;
     }
 
-    // Try each secret until one matches
-    for (const secret of secrets) {
+    // Use provided secrets or fall back to configured webhook secrets
+    const secretsToTry = secrets && secrets.length > 0 ? secrets : this.webhookSecrets;
+
+    if (!secretsToTry || secretsToTry.length === 0) {
+      console.warn('PaystackProviderAdapter: No webhook secrets configured');
+      return false;
+    }
+
+    // Try each secret until one matches (supports key rotation)
+    for (const secret of secretsToTry) {
       const hash = crypto
         .createHmac('sha512', secret)
         .update(rawBody)
@@ -207,32 +288,46 @@ export class PaystackProviderAdapter implements PaymentProviderAdapter {
   }
 
   /**
-   * Verify transaction with Paystack API (optional)
+   * Verify transaction with Paystack API
+   *
+   * Uses the secret key configured during initialization.
+   * Falls back to options.apiKey for backward compatibility.
    */
   async verifyWithProvider?(
     providerRef: string,
     options?: VerifyOptions,
   ): Promise<ProviderVerificationResult | null> {
-    // This would require the secret key to be passed in options
-    // In production, this would make an API call to Paystack
+    // Use configured secret key, fall back to options for backward compatibility
+    const secretKey = this.secretKey || options?.apiKey;
 
-    if (!options?.secretKey) {
+    if (!secretKey) {
+      console.warn(
+        'PaystackProviderAdapter: No secret key available for API verification. ' +
+        'Configure keys.secretKey in provider configuration.'
+      );
       return null;
     }
 
     try {
-      const response = await fetch(
-        `https://api.paystack.co/transaction/verify/${providerRef}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${options.secretKey}`,
-            'Content-Type': 'application/json',
-          },
+      const url = `${this.config.apiBaseUrl}/transaction/verify/${providerRef}`;
+      const timeout = options?.timeout || this.config.timeout || 30000;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
         },
-      );
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
+        console.error(`Paystack API error: ${response.status} ${response.statusText}`);
         return null;
       }
 

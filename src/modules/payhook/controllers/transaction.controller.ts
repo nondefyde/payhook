@@ -16,7 +16,13 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiQuery,
+  ApiBody,
+} from '@nestjs/swagger';
 import {
   TransactionService,
   Transaction,
@@ -76,7 +82,9 @@ export class TransactionController {
       this.logger.error(`Failed to create transaction: ${error}`);
 
       if (error instanceof Error && error.message.includes('unique')) {
-        throw new BadRequestException('Transaction with this application reference already exists');
+        throw new BadRequestException(
+          'Transaction with this application reference already exists',
+        );
       }
 
       throw error;
@@ -134,13 +142,16 @@ export class TransactionController {
     @Param('applicationRef') applicationRef: string,
     @Query('verify') verify?: boolean,
   ): Promise<Transaction> {
-    const transaction = await this.transactionService.getTransactionByApplicationRef(
-      applicationRef,
-      { verify: verify === true },
-    );
+    const transaction =
+      await this.transactionService.getTransactionByApplicationRef(
+        applicationRef,
+        { verify: verify === true },
+      );
 
     if (!transaction) {
-      throw new NotFoundException(`Transaction not found with application ref: ${applicationRef}`);
+      throw new NotFoundException(
+        `Transaction not found with application ref: ${applicationRef}`,
+      );
     }
 
     return transaction;
@@ -155,10 +166,11 @@ export class TransactionController {
     @Param('provider') provider: string,
     @Param('providerRef') providerRef: string,
   ): Promise<Transaction> {
-    const transaction = await this.transactionService.getTransactionByProviderRef(
-      provider,
-      providerRef,
-    );
+    const transaction =
+      await this.transactionService.getTransactionByProviderRef(
+        provider,
+        providerRef,
+      );
 
     if (!transaction) {
       throw new NotFoundException(
@@ -181,7 +193,10 @@ export class TransactionController {
       required: ['providerRef'],
       properties: {
         providerRef: { type: 'string', example: 'ps_ref_123' },
-        verificationMethod: { type: 'string', enum: ['WEBHOOK_ONLY', 'WEBHOOK_AND_API'] },
+        verificationMethod: {
+          type: 'string',
+          enum: ['WEBHOOK_ONLY', 'WEBHOOK_AND_API'],
+        },
         performedBy: { type: 'string', example: 'user@example.com' },
       },
     },
@@ -259,8 +274,14 @@ export class TransactionController {
     schema: {
       type: 'object',
       properties: {
-        force: { type: 'boolean', description: 'Force status update even if invalid transition' },
-        updateStatus: { type: 'boolean', description: 'Update local status if diverged' },
+        force: {
+          type: 'boolean',
+          description: 'Force status update even if invalid transition',
+        },
+        updateStatus: {
+          type: 'boolean',
+          description: 'Update local status if diverged',
+        },
       },
     },
   })
@@ -376,9 +397,7 @@ export class TransactionController {
     type: 'string',
     description: 'Filter by provider',
   })
-  async getStatistics(
-    @Query('provider') provider?: string,
-  ): Promise<any> {
+  async getStatistics(@Query('provider') provider?: string): Promise<any> {
     return await this.transactionService.getStatistics({ provider });
   }
 
@@ -400,7 +419,8 @@ export class TransactionController {
     description: 'Maximum number of results',
   })
   async scanStaleTransactions(
-    @Query('staleAfterMinutes', new DefaultValuePipe(60), ParseIntPipe) staleAfterMinutes?: number,
+    @Query('staleAfterMinutes', new DefaultValuePipe(60), ParseIntPipe)
+    staleAfterMinutes?: number,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit?: number,
   ): Promise<Transaction[]> {
     return await this.transactionService.scanStaleTransactions({

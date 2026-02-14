@@ -48,18 +48,29 @@ import {
     // Setup PayHook
     PayHookModule.forRoot({
       storage: {
-        adapter: 'typeorm',
+        type: 'typeorm',
       },
-      providers: {
-        paystack: {
+      providers: [
+        {
+          name: 'paystack',
           adapter: PaystackProviderAdapter,
-          secrets: [process.env.PAYSTACK_SECRET],
+          keys: {
+            secretKey: process.env.PAYSTACK_SECRET_KEY!,
+            publicKey: process.env.PAYSTACK_PUBLIC_KEY,
+            // webhookSecret not needed for Paystack (uses secretKey)
+          },
         },
-      },
-      webhook: {
-        path: '/webhooks',
-        timeout: 30000,
-      },
+        // Example with Stripe (uses separate webhook secret)
+        // {
+        //   name: 'stripe',
+        //   adapter: StripeProviderAdapter,
+        //   keys: {
+        //     secretKey: process.env.STRIPE_SECRET_KEY!,
+        //     publicKey: process.env.STRIPE_PUBLISHABLE_KEY,
+        //     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET, // Different from secretKey!
+        //   },
+        // },
+      ],
     }),
   ],
 })
@@ -76,9 +87,14 @@ DB_USERNAME=payhook
 DB_PASSWORD=payhook
 DB_NAME=payhook
 
-# Provider Secrets
-PAYSTACK_SECRET=sk_test_xxxxx
-STRIPE_SECRET=whsec_xxxxx
+# Paystack Configuration
+PAYSTACK_SECRET_KEY=sk_test_xxxxx  # Used for both webhooks and API
+PAYSTACK_PUBLIC_KEY=pk_test_xxxxx  # Optional, for frontend
+
+# Stripe Configuration (if using Stripe)
+STRIPE_SECRET_KEY=sk_test_xxxxx           # API secret key
+STRIPE_WEBHOOK_SECRET=whsec_xxxxx         # Separate webhook endpoint secret
+STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx      # Optional, for frontend
 ```
 
 ### Docker Compose (Development)
@@ -479,21 +495,48 @@ PayHookModule.forRoot({
     },
   },
 
-  // Provider Configuration
-  providers: {
-    paystack: {
+  // Provider Configuration (normalized interface)
+  providers: [
+    {
+      name: 'paystack',
       adapter: PaystackProviderAdapter,
-      secrets: [process.env.PAYSTACK_SECRET],
+      keys: {
+        secretKey: process.env.PAYSTACK_SECRET_KEY!,
+        publicKey: process.env.PAYSTACK_PUBLIC_KEY,
+        // webhookSecret: Not needed - Paystack uses secretKey for webhooks
+        previousKeys: {
+          // For key rotation period
+          secretKey: process.env.PAYSTACK_SECRET_KEY_OLD,
+        },
+      },
       options: {
-        apiKey: process.env.PAYSTACK_API_KEY,
-        verifyTimeout: 10000,
+        apiUrl: 'https://api.paystack.co',
+        apiTimeout: 10000,
+        testMode: process.env.NODE_ENV !== 'production',
       },
     },
-    stripe: {
+    {
+      name: 'stripe',
       adapter: StripeProviderAdapter,
-      secrets: [process.env.STRIPE_WEBHOOK_SECRET],
+      keys: {
+        secretKey: process.env.STRIPE_SECRET_KEY!,
+        publicKey: process.env.STRIPE_PUBLISHABLE_KEY,
+        webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!, // Different from secretKey!
+        previousKeys: {
+          webhookSecret: process.env.STRIPE_WEBHOOK_SECRET_OLD,
+        },
+      },
     },
-  },
+    {
+      name: 'flutterwave',
+      adapter: FlutterwaveProviderAdapter,
+      keys: {
+        secretKey: process.env.FLUTTERWAVE_SECRET_KEY!,
+        publicKey: process.env.FLUTTERWAVE_PUBLIC_KEY,
+        webhookSecret: process.env.FLUTTERWAVE_WEBHOOK_HASH!, // Separate hash
+      },
+    },
+  ],
 
   // Webhook Configuration
   webhook: {

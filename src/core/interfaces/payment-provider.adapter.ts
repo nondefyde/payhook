@@ -173,9 +173,38 @@ export interface ProviderConfig {
 }
 
 /**
+ * Provider API credentials for authentication
+ */
+export interface ProviderApiCredentials {
+  /**
+   * Secret/Private key for API authentication
+   * - Paystack: sk_test_xxx or sk_live_xxx
+   * - Stripe: sk_test_xxx or sk_live_xxx
+   * - Flutterwave: FLWSECK_xxx
+   */
+  secretKey?: string;
+
+  /**
+   * Public key (if required by provider)
+   * - Paystack: pk_test_xxx or pk_live_xxx
+   * - Stripe: pk_test_xxx or pk_live_xxx
+   * - Flutterwave: FLWPUBK_xxx
+   */
+  publicKey?: string;
+
+  /**
+   * Additional provider-specific credentials
+   */
+  [key: string]: string | undefined;
+}
+
+/**
  * Options for API verification
  */
 export interface VerifyOptions {
+  /**
+   * @deprecated Use apiCredentials in provider configuration instead
+   */
   apiKey?: string;
   timeout?: number;
   retryOnFailure?: boolean;

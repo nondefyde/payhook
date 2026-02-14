@@ -21,12 +21,100 @@ export interface PayHookModuleConfig {
 
   /**
    * Provider configurations
+   *
+   * Unified configuration that handles all provider authentication patterns:
+   * - Some providers use same key for webhooks and API (Paystack)
+   * - Some use separate keys (Stripe, Flutterwave)
+   * - All support key rotation via arrays
    */
   providers: Array<{
+    /**
+     * Unique provider identifier
+     */
     name: string;
-    adapter: PaymentProviderAdapter | 'mock' | 'paystack';
-    secrets: string[];
-    options?: Record<string, any>;
+
+    /**
+     * Provider adapter instance or name
+     */
+    adapter: PaymentProviderAdapter | 'mock' | 'paystack' | 'stripe' | 'flutterwave';
+
+    /**
+     * Authentication keys configuration
+     *
+     * This unified structure handles all provider patterns:
+     * - Paystack: secretKey is used for both webhooks and API
+     * - Stripe: secretKey for API, webhookSecret for webhooks
+     * - Flutterwave: secretKey for API, webhookSecret for webhooks
+     */
+    keys: {
+      /**
+       * Secret/Private key for API operations
+       * Examples:
+       * - Paystack: sk_test_xxx or sk_live_xxx
+       * - Stripe: sk_test_xxx or sk_live_xxx
+       * - Flutterwave: FLWSECK_TEST-xxx or FLWSECK-xxx
+       */
+      secretKey: string;
+
+      /**
+       * Public/Publishable key for frontend operations (optional)
+       * Examples:
+       * - Paystack: pk_test_xxx or pk_live_xxx
+       * - Stripe: pk_test_xxx or pk_live_xxx
+       * - Flutterwave: FLWPUBK_TEST-xxx or FLWPUBK-xxx
+       */
+      publicKey?: string;
+
+      /**
+       * Webhook signature verification secret(s)
+       * - If not provided, secretKey will be used (Paystack pattern)
+       * - If provided, this will be used instead (Stripe pattern)
+       * - Array supports key rotation (try each until one matches)
+       *
+       * Examples:
+       * - Paystack: Not needed (uses secretKey)
+       * - Stripe: ['whsec_xxx', 'whsec_old_xxx']
+       * - Flutterwave: ['webhook_hash_xxx']
+       */
+      webhookSecret?: string | string[];
+
+      /**
+       * Previous keys for rotation period (optional)
+       * During key rotation, both old and new keys are accepted
+       */
+      previousKeys?: {
+        secretKey?: string;
+        webhookSecret?: string | string[];
+      };
+    };
+
+    /**
+     * Provider-specific options
+     */
+    options?: {
+      /**
+       * API base URL (for custom/sandbox environments)
+       * Default: Provider's production URL
+       */
+      apiUrl?: string;
+
+      /**
+       * Timeout for API calls in milliseconds
+       * Default: 30000 (30 seconds)
+       */
+      apiTimeout?: number;
+
+      /**
+       * Enable test mode (auto-detected from keys if not specified)
+       * Default: Detected from key prefix (sk_test_, pk_test_, etc.)
+       */
+      testMode?: boolean;
+
+      /**
+       * Additional provider-specific options
+       */
+      [key: string]: any;
+    };
   }>;
 
   /**

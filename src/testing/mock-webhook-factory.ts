@@ -1,4 +1,4 @@
-import { MockProviderAdapter } from '../adapters/providers/mock/mock-provider.adapter';
+import { MockProviderAdapter } from '../adapters/providers/mock';
 
 /**
  * Factory for generating mock webhook payloads
