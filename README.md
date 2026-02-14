@@ -7,6 +7,7 @@ A database and provider agnostic NestJS library for converting payment provider 
 - **Query-First API**: Safe for humans and AI agents - query for truth, don't trust webhooks blindly
 - **Provider Agnostic**: Adapter pattern supports any payment provider (Paystack, Stripe, Flutterwave, etc.)
 - **Database Agnostic**: Works with PostgreSQL, MySQL, SQL Server, SQLite via TypeORM (MongoDB, DynamoDB adapters possible)
+- **Unified Authentication**: Single interface handles all provider authentication patterns
 - **State Machine**: Enforces valid transaction lifecycle transitions with guards and conditions
 - **7-Layer Pipeline**: Verification → Normalization → Persistence → Deduplication → State Engine → Dispatch
 - **Audit Everything**: Complete append-only audit trail for every webhook and state change
@@ -27,8 +28,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
   PayHookModule,
-  TypeORMStorageAdapter,
   PaystackProviderAdapter,
+  StripeProviderAdapter,
 } from '@payhook/core';
 
 @Module({
@@ -45,7 +46,7 @@ import {
       synchronize: true, // Disable in production
     }),
 
-    // Setup PayHook
+    // Setup PayHook with unified provider configuration
     PayHookModule.forRoot({
       storage: {
         type: 'typeorm',
@@ -57,19 +58,18 @@ import {
           keys: {
             secretKey: process.env.PAYSTACK_SECRET_KEY!,
             publicKey: process.env.PAYSTACK_PUBLIC_KEY,
-            // webhookSecret not needed for Paystack (uses secretKey)
+            // Note: Paystack uses secretKey for webhooks (no separate webhookSecret needed)
           },
         },
-        // Example with Stripe (uses separate webhook secret)
-        // {
-        //   name: 'stripe',
-        //   adapter: StripeProviderAdapter,
-        //   keys: {
-        //     secretKey: process.env.STRIPE_SECRET_KEY!,
-        //     publicKey: process.env.STRIPE_PUBLISHABLE_KEY,
-        //     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET, // Different from secretKey!
-        //   },
-        // },
+        {
+          name: 'stripe',
+          adapter: StripeProviderAdapter,
+          keys: {
+            secretKey: process.env.STRIPE_SECRET_KEY!,
+            publicKey: process.env.STRIPE_PUBLISHABLE_KEY,
+            webhookSecret: process.env.STRIPE_WEBHOOK_SECRET!, // ⚠️ Different from secretKey!
+          },
+        },
       ],
     }),
   ],
@@ -87,14 +87,23 @@ DB_USERNAME=payhook
 DB_PASSWORD=payhook
 DB_NAME=payhook
 
-# Paystack Configuration
-PAYSTACK_SECRET_KEY=sk_test_xxxxx  # Used for both webhooks and API
-PAYSTACK_PUBLIC_KEY=pk_test_xxxxx  # Optional, for frontend
+# ============================================
+# Provider Authentication Keys
+# ============================================
 
-# Stripe Configuration (if using Stripe)
-STRIPE_SECRET_KEY=sk_test_xxxxx           # API secret key
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx         # Separate webhook endpoint secret
-STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx      # Optional, for frontend
+# Paystack (uses SAME key for webhooks and API)
+PAYSTACK_SECRET_KEY=sk_test_xxxxx      # Used for BOTH webhooks and API calls
+PAYSTACK_PUBLIC_KEY=pk_test_xxxxx      # Optional, for frontend
+
+# Stripe (uses DIFFERENT keys for webhooks and API)
+STRIPE_SECRET_KEY=sk_test_xxxxx        # API calls only
+STRIPE_WEBHOOK_SECRET=whsec_xxxxx      # Webhook signatures only (different!)
+STRIPE_PUBLISHABLE_KEY=pk_test_xxxxx   # Optional, for frontend
+
+# Flutterwave (uses DIFFERENT keys for webhooks and API)
+FLUTTERWAVE_SECRET_KEY=FLWSECK_TEST-xxxxx    # API calls only
+FLUTTERWAVE_PUBLIC_KEY=FLWPUBK_TEST-xxxxx    # Optional, for frontend
+FLUTTERWAVE_WEBHOOK_HASH=xxxxx               # Webhook verification only
 ```
 
 ### Docker Compose (Development)
@@ -478,6 +487,74 @@ describe('Payment Flow', () => {
     expect(result.fate).toBe('PROCESSED');
   });
 });
+```
+
+## Provider Authentication Patterns
+
+PayHook uses a unified configuration interface that handles different provider authentication patterns:
+
+### Quick Reference
+
+| Provider | API Key | Webhook Secret | Pattern |
+|----------|---------|----------------|---------|
+| Paystack | `secretKey` | Same as `secretKey` | Same key for both |
+| Stripe | `secretKey` | `webhookSecret` (different!) | Separate keys |
+| Flutterwave | `secretKey` | `webhookSecret` (different!) | Separate keys |
+
+### Pattern 1: Same Key (Paystack)
+Some providers use the **same secret key** for both webhook signatures and API calls:
+
+```typescript
+{
+  name: 'paystack',
+  adapter: PaystackProviderAdapter,
+  keys: {
+    secretKey: 'sk_test_xxx',  // Used for BOTH webhooks and API
+    publicKey: 'pk_test_xxx',   // Optional, for frontend
+    // webhookSecret: not needed, defaults to secretKey
+  }
+}
+```
+
+### Pattern 2: Separate Keys (Stripe, Flutterwave)
+Other providers use **different keys** for webhooks and API:
+
+```typescript
+{
+  name: 'stripe',
+  adapter: StripeProviderAdapter,
+  keys: {
+    secretKey: 'sk_test_xxx',        // For API calls only
+    publicKey: 'pk_test_xxx',         // For frontend
+    webhookSecret: 'whsec_xxx',      // Different key for webhook signatures!
+  }
+}
+```
+
+### Key Rotation Support
+During key rotation, you can provide previous keys to accept both old and new signatures:
+
+```typescript
+{
+  name: 'paystack',
+  adapter: PaystackProviderAdapter,
+  keys: {
+    secretKey: 'sk_live_new_xxx',
+    previousKeys: {
+      secretKey: 'sk_live_old_xxx',  // Accepts both during transition
+    }
+  }
+}
+
+// For providers with separate webhook secrets
+{
+  name: 'stripe',
+  adapter: StripeProviderAdapter,
+  keys: {
+    secretKey: 'sk_live_xxx',
+    webhookSecret: ['whsec_new_xxx', 'whsec_old_xxx'],  // Array for multiple
+  }
+}
 ```
 
 ## Configuration

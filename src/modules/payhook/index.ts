@@ -12,7 +12,6 @@ export { PayHookModuleConfig, PayHookModuleAsyncConfig, defaultPayHookConfig } f
 
 // Controllers
 export { WebhookController } from './controllers/webhook.controller';
-export { CleanWebhookController } from './controllers/webhook.controller.clean';
 export { TransactionController } from './controllers/transaction.controller';
 export { HealthController } from './controllers/health.controller';
 
