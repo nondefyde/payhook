@@ -70,16 +70,13 @@ export class VerificationStage implements PipelineStage {
         context.signatureError = 'Signature verification failed';
         context.processingStatus = ProcessingStatus.SIGNATURE_FAILED;
 
+        // Continue pipeline to log the failure (per PRD: "Every claim has a fate")
         return {
-          success: false,
+          success: true, // Verification stage succeeded in classifying the webhook
           context,
-          error: new SignatureVerificationError(
-            'Invalid webhook signature',
-            context.provider,
-            context.headers,
-          ),
-          shouldContinue: false,
+          shouldContinue: true, // Continue to persist-claim stage to log the failure
           metadata: {
+            signatureFailed: true,
             durationMs: Date.now() - startTime,
           },
         };

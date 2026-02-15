@@ -34,7 +34,6 @@ import {
 } from '../../core';
 import { WebhookController } from './controllers/webhook.controller';
 import { TransactionController } from './controllers/transaction.controller';
-import { HealthController } from './controllers/health.controller';
 import { PayHookService } from './services/payhook.service';
 import { ConfigurationService } from './services/configuration.service';
 import { OutboxProcessor } from './services/outbox.processor';
@@ -87,7 +86,7 @@ export class PayHookModule {
       module: PayHookModule,
       imports: options.imports || [],
       providers: [...providers, ...this.createDynamicProviders()],
-      controllers: [WebhookController, TransactionController, HealthController],
+      controllers: [WebhookController, TransactionController],
       exports: [
         PAYHOOK_CONFIG,
         STORAGE_ADAPTER,
@@ -312,11 +311,7 @@ export class PayHookModule {
    * Create controllers based on configuration
    */
   private static createControllers(config: PayHookModuleConfig): any[] {
-    const controllers = [
-      WebhookController,
-      TransactionController,
-      HealthController,
-    ];
+    const controllers = [WebhookController, TransactionController];
 
     return controllers;
   }

@@ -155,9 +155,42 @@ export interface PayHookModuleConfig {
    * API configuration
    */
   api?: {
-    prefix?: string;
+    /**
+     * Route configuration for PayHook endpoints
+     * Allows customizing the paths for essential HTTP endpoints
+     */
+    routes?: {
+      /**
+       * Base path for webhook endpoints
+       * @default 'webhooks'
+       * @example 'hooks' → POST /hooks/:provider
+       */
+      webhooks?: string;
+
+      /**
+       * Base path for transaction endpoints
+       * @default 'transactions'
+       * @example 'txn' → POST /txn, GET /txn/by-app-ref/:ref
+       */
+      transactions?: string;
+    };
+
+    /**
+     * Global prefix for all routes (optional)
+     * @example 'api/v1' → /api/v1/webhooks/:provider
+     */
     globalPrefix?: string;
+
+    /**
+     * Raw body size limit for webhook payloads
+     * @default '10mb'
+     */
     rawBodyLimit?: string;
+
+    /**
+     * Enable Swagger/OpenAPI documentation
+     * @default false in production
+     */
     enableSwagger?: boolean;
   };
 
@@ -208,7 +241,10 @@ export const defaultPayHookConfig: Partial<PayHookModuleConfig> = {
     autoCreateTransactions: false,
   },
   api: {
-    prefix: '/webhooks',
+    routes: {
+      webhooks: 'webhooks',
+      transactions: 'transactions',
+    },
     rawBodyLimit: '10mb',
     enableSwagger: true,
   },

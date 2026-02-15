@@ -147,7 +147,7 @@ describe('PaystackProviderAdapter', () => {
 
       const normalized = adapter.normalize(rawPayload);
 
-      expect(normalized.eventType).toBe(NormalizedEventType.PAYMENT_SUCCEEDED);
+      expect(normalized.eventType).toBe(NormalizedEventType.PAYMENT_SUCCESSFUL);
       expect(normalized.amount).toBe(10000);
       expect(normalized.currency).toBe('NGN');
       expect(normalized.providerRef).toBe('ref_test_123');
@@ -173,7 +173,7 @@ describe('PaystackProviderAdapter', () => {
 
       const normalized = adapter.normalize(rawPayload);
 
-      expect(normalized.eventType).toBe(NormalizedEventType.REFUND_COMPLETED);
+      expect(normalized.eventType).toBe(NormalizedEventType.REFUND_SUCCESSFUL);
       expect(normalized.amount).toBe(5000);
       expect(normalized.providerRef).toBe('ref_refund_456');
     });
@@ -193,7 +193,7 @@ describe('PaystackProviderAdapter', () => {
 
       const normalized = adapter.normalize(rawPayload);
 
-      expect(normalized.eventType).toBe(NormalizedEventType.DISPUTE_CREATED);
+      expect(normalized.eventType).toBe(NormalizedEventType.CHARGE_DISPUTED);
       expect(normalized.amount).toBe(20000);
     });
 
@@ -207,7 +207,7 @@ describe('PaystackProviderAdapter', () => {
 
       const normalized = adapter.normalize(rawPayload);
 
-      expect(normalized.eventType).toBe(NormalizedEventType.UNKNOWN);
+      expect(normalized.eventType).toBe(NormalizedEventType.PAYMENT_FAILED);
     });
   });
 

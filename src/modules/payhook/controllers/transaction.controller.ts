@@ -15,57 +15,73 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import {
-  TransactionService,
-  Transaction,
-  AuditLog,
-  WebhookLog,
-} from '../../../core';
-import {
-  ApiCreateTransaction,
-  ApiGetTransaction,
-  ApiMarkAsProcessing,
-  ApiReconcileTransaction,
-  ApiListTransactions,
-  ApiScanStaleTransactions,
-  ApiTransactionStatistics,
-} from '../../../_shared/swagger/decorators';
+import { TransactionService, Transaction } from '../../../core';
+import { TRANSACTION_SERVICE } from '../constants';
 import {
   CreateTransactionDto,
   MarkAsProcessingDto,
-  UpdateTransactionMetadataDto,
-  ReconcileTransactionDto,
-  TransactionQueryDto,
-  ListTransactionsDto,
-  ScanStaleTransactionsDto,
+  TransactionResponseDto,
 } from '../../../_shared/dto';
+import {
+  ApiCreateTransaction,
+  ApiMarkAsProcessing,
+  ApiGetTransactionByAppRef,
+} from '../../../_shared/swagger/decorators';
 
 /**
  * Transaction Controller
- * Using shared Swagger decorators and DTOs for better maintainability
+ *
+ * Minimal HTTP endpoints for essential transaction operations.
+ * These are the operations that MUST be HTTP because:
+ * 1. POST /transactions - Frontend/agents need to create transactions
+ * 2. PUT /transactions/:id/processing - Need to link provider ref after redirect
+ * 3. GET /transactions/by-app-ref/:ref - The "did money come in?" query
+ *
+ * Everything else (reconciliation, statistics, audit trails, etc.) should be
+ * accessed programmatically through TransactionService.
  */
-@ApiTags('Transactions')
+@ApiTags('Query')
 @Controller('transactions')
 export class TransactionController {
   private readonly logger = new Logger(TransactionController.name);
 
   constructor(
-    @Inject(TransactionService)
+    @Inject(TRANSACTION_SERVICE)
     private readonly transactionService: TransactionService,
   ) {}
 
+  /**
+   * Create a new transaction
+   * Called when payment is initiated but before provider interaction
+   */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiCreateTransaction()
   async createTransaction(
     @Body() dto: CreateTransactionDto,
-  ): Promise<Transaction> {
+  ): Promise<TransactionResponseDto> {
     this.logger.log(`Creating transaction: ${dto.applicationRef}`);
 
     try {
       const transaction = await this.transactionService.createTransaction(dto);
       this.logger.log(`Transaction created: ${transaction.id}`);
-      return transaction;
+
+      // Map to response DTO
+      return {
+        id: transaction.id,
+        applicationRef: transaction.applicationRef,
+        providerRef: transaction.providerRef,
+        provider: transaction.provider,
+        status: transaction.status,
+        amount: transaction.money.amount,
+        currency: transaction.money.currency,
+        verificationMethod: transaction.verificationMethod,
+        isSettled: transaction.isSettled(),
+        metadata: transaction.metadata,
+        createdAt: transaction.createdAt,
+        updatedAt: transaction.updatedAt,
+        providerCreatedAt: transaction.providerCreatedAt,
+      };
     } catch (error) {
       this.logger.error(`Failed to create transaction: ${error}`);
 
@@ -79,78 +95,38 @@ export class TransactionController {
     }
   }
 
-  @Get(':id')
-  @ApiGetTransaction()
-  async getTransaction(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query() query: TransactionQueryDto,
-  ): Promise<Transaction> {
-    const transaction = await this.transactionService.getTransaction(id, {
-      verify: query.verify === true,
-      includeWebhooks: query.includeWebhooks === true,
-      includeAuditTrail: query.includeAuditTrail === true,
-    });
-
-    if (!transaction) {
-      throw new NotFoundException(`Transaction not found: ${id}`);
-    }
-
-    return transaction;
-  }
-
-  @Get('application/:applicationRef')
-  @ApiGetTransaction({ byApplicationRef: true })
-  async getByApplicationRef(
-    @Param('applicationRef') applicationRef: string,
-    @Query() query: TransactionQueryDto,
-  ): Promise<Transaction> {
-    const transaction =
-      await this.transactionService.getTransactionByApplicationRef(
-        applicationRef,
-        { verify: query.verify === true },
-      );
-
-    if (!transaction) {
-      throw new NotFoundException(
-        `Transaction not found with application ref: ${applicationRef}`,
-      );
-    }
-
-    return transaction;
-  }
-
-  @Get('provider/:provider/:providerRef')
-  @ApiGetTransaction({ byProviderRef: true })
-  async getByProviderRef(
-    @Param('provider') provider: string,
-    @Param('providerRef') providerRef: string,
-  ): Promise<Transaction> {
-    const transaction =
-      await this.transactionService.getTransactionByProviderRef(
-        provider,
-        providerRef,
-      );
-
-    if (!transaction) {
-      throw new NotFoundException(
-        `Transaction not found with provider ref: ${provider}/${providerRef}`,
-      );
-    }
-
-    return transaction;
-  }
-
+  /**
+   * Mark transaction as processing
+   * Called after successful provider handoff to link provider reference
+   */
   @Put(':id/processing')
   @HttpCode(HttpStatus.OK)
   @ApiMarkAsProcessing()
   async markAsProcessing(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarkAsProcessingDto,
-  ): Promise<Transaction> {
+  ): Promise<TransactionResponseDto> {
     this.logger.log(`Marking transaction ${id} as processing`);
 
     try {
-      return await this.transactionService.markAsProcessing(id, dto);
+      const transaction = await this.transactionService.markAsProcessing(id, dto);
+
+      // Map to response DTO
+      return {
+        id: transaction.id,
+        applicationRef: transaction.applicationRef,
+        providerRef: transaction.providerRef,
+        provider: transaction.provider,
+        status: transaction.status,
+        amount: transaction.money.amount,
+        currency: transaction.money.currency,
+        verificationMethod: transaction.verificationMethod,
+        isSettled: transaction.isSettled(),
+        metadata: transaction.metadata,
+        createdAt: transaction.createdAt,
+        updatedAt: transaction.updatedAt,
+        providerCreatedAt: transaction.providerCreatedAt,
+      };
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes('not found')) {
@@ -164,124 +140,43 @@ export class TransactionController {
     }
   }
 
-  @Get(':id/audit-trail')
-  @ApiGetTransaction({ auditTrailOnly: true })
-  async getAuditTrail(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<AuditLog[]> {
-    const auditLogs = await this.transactionService.getAuditTrail(id);
+  /**
+   * Get transaction by application reference
+   * The "did money come in?" query - most important read endpoint
+   */
+  @Get('by-app-ref/:applicationRef')
+  @ApiGetTransactionByAppRef()
+  async getByApplicationRef(
+    @Param('applicationRef') applicationRef: string,
+    @Query('verify') verify?: boolean,
+  ): Promise<TransactionResponseDto> {
+    const transaction =
+      await this.transactionService.getTransactionByApplicationRef(
+        applicationRef,
+        { verify: verify || false },
+      );
 
-    if (auditLogs.length === 0) {
-      const transaction = await this.transactionService.getTransaction(id);
-      if (!transaction) {
-        throw new NotFoundException(`Transaction not found: ${id}`);
-      }
-    }
-
-    return auditLogs;
-  }
-
-  @Get(':id/webhooks')
-  @ApiGetTransaction({ webhooksOnly: true })
-  async getWebhooks(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<WebhookLog[]> {
-    const webhooks = await this.transactionService.getTransactionWebhooks(id);
-
-    if (webhooks.length === 0) {
-      const transaction = await this.transactionService.getTransaction(id);
-      if (!transaction) {
-        throw new NotFoundException(`Transaction not found: ${id}`);
-      }
-    }
-
-    return webhooks;
-  }
-
-  @Post(':id/reconcile')
-  @HttpCode(HttpStatus.OK)
-  @ApiReconcileTransaction()
-  async reconcile(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReconcileTransactionDto,
-  ): Promise<any> {
-    this.logger.log(`Reconciling transaction ${id}`);
-
-    try {
-      return await this.transactionService.reconcile(id, dto);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('not found')) {
-        throw new NotFoundException(error.message);
-      }
-      throw error;
-    }
-  }
-
-  @Get()
-  @ApiListTransactions()
-  async listTransactions(@Query() query: ListTransactionsDto): Promise<{
-    transactions: Transaction[];
-    total: number;
-    hasMore: boolean;
-  }> {
-    if (query.status) {
-      return await this.transactionService.listTransactionsByStatus(
-        query.status,
-        {
-          provider: query.provider,
-          limit: query.limit,
-          offset: query.offset,
-        },
+    if (!transaction) {
+      throw new NotFoundException(
+        `Transaction not found with application ref: ${applicationRef}`,
       );
     }
 
-    // Default to pending if no status provided
-    return await this.transactionService.listTransactionsByStatus(
-      'PENDING' as any,
-      {
-        provider: query.provider,
-        limit: query.limit,
-        offset: query.offset,
-      },
-    );
-  }
-
-  @Get(':id/settled')
-  @ApiGetTransaction({ settledCheck: true })
-  async isSettled(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<{ settled: boolean; status?: string }> {
-    const settled = await this.transactionService.isSettled(id);
-
-    if (!settled) {
-      const transaction = await this.transactionService.getTransaction(id);
-      if (!transaction) {
-        throw new NotFoundException(`Transaction not found: ${id}`);
-      }
-
-      return {
-        settled: false,
-        status: transaction.status,
-      };
-    }
-
-    return { settled: true };
-  }
-
-  @Get('stats/summary')
-  @ApiTransactionStatistics()
-  async getStatistics(@Query('provider') provider?: string): Promise<any> {
-    return await this.transactionService.getStatistics({ provider });
-  }
-
-  @Get('stale/scan')
-  @ApiScanStaleTransactions()
-  async scanStaleTransactions(
-    @Query() query: ScanStaleTransactionsDto,
-  ): Promise<Transaction[]> {
-    return await this.transactionService.scanStaleTransactions({
-      staleAfterMinutes: query.staleAfterMinutes,
-      limit: query.limit,
-    });
+    // Return simplified response optimized for the "did money come in?" use case
+    return {
+      id: transaction.id,
+      applicationRef: transaction.applicationRef,
+      providerRef: transaction.providerRef,
+      provider: transaction.provider,
+      status: transaction.status,
+      amount: transaction.money.amount,
+      currency: transaction.money.currency,
+      isSettled: transaction.isSettled(),
+      verificationMethod: transaction.verificationMethod,
+      metadata: transaction.metadata,
+      createdAt: transaction.createdAt,
+      updatedAt: transaction.updatedAt,
+      providerCreatedAt: transaction.providerCreatedAt,
+    };
   }
 }

@@ -509,10 +509,18 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     const entity = this.auditLogRepo.create({
       transactionId: dto.transactionId,
       action: dto.action,
-      performedBy: dto.performedBy,
+      performedBy: dto.performedBy || dto.actor,
       performedAt: dto.performedAt,
-      stateBefore: dto.stateBefore,
-      stateAfter: dto.stateAfter,
+      fromStatus: dto.fromStatus ?? dto.stateBefore,
+      toStatus: dto.toStatus ?? dto.stateAfter,
+      stateBefore: dto.stateBefore ?? dto.fromStatus,
+      stateAfter: dto.stateAfter ?? dto.toStatus,
+      triggerType: dto.triggerType,
+      webhookLogId: dto.webhookLogId,
+      reconciliationResult: dto.reconciliationResult,
+      verificationMethod: dto.verificationMethod,
+      actor: dto.actor || dto.performedBy,
+      reason: dto.reason,
       metadata: dto.metadata || {},
     });
 
@@ -957,15 +965,17 @@ export class TypeORMStorageAdapter implements StorageAdapter {
     return new AuditLog(
       entity.id,
       entity.transactionId,
-      entity.fromStatus,
-      entity.toStatus,
+      entity.fromStatus ?? entity.stateBefore, // Use fromStatus (DB column) first
+      entity.toStatus ?? entity.stateAfter, // Use toStatus (DB column) first
       entity.triggerType,
       entity.createdAt,
       entity.webhookLogId,
       entity.reconciliationResult,
       entity.verificationMethod,
-      entity.metadata,
-      entity.actor,
+      entity.action
+        ? { ...entity.metadata, action: entity.action }
+        : entity.metadata, // Include action in metadata
+      entity.actor ?? entity.performedBy, // Use actor (DB column) first
       entity.reason,
     );
   }

@@ -85,9 +85,23 @@ export class ConfigurationService {
   }
 
   /**
-   * Get API prefix
+   * Get webhook route path
    */
-  getApiPrefix(): string {
-    return this.config.api?.prefix || '/webhooks';
+  getWebhookRoute(): string {
+    return this.config.api?.routes?.webhooks || 'webhooks';
+  }
+
+  /**
+   * Get transaction route path
+   */
+  getTransactionRoute(): string {
+    return this.config.api?.routes?.transactions || 'transactions';
+  }
+
+  /**
+   * Get global API prefix
+   */
+  getGlobalPrefix(): string | undefined {
+    return this.config.api?.globalPrefix;
   }
 }

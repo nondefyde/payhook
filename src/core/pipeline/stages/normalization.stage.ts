@@ -51,12 +51,13 @@ export class NormalizationStage implements PipelineStage {
           context.normalizationError = error.message;
           context.processingStatus = ProcessingStatus.NORMALIZATION_FAILED;
 
+          // Continue pipeline to log the normalization failure (per PRD: "Every claim has a fate")
           return {
-            success: false,
+            success: true, // Normalization stage succeeded in classifying the webhook
             context,
-            error,
-            shouldContinue: false,
+            shouldContinue: true, // Continue to persist-claim stage to log the failure
             metadata: {
+              normalizationFailed: true,
               eventType: error.eventType,
               provider: error.providerName,
               durationMs: Date.now() - startTime,

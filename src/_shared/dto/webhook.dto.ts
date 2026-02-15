@@ -13,35 +13,41 @@ import { Type } from 'class-transformer';
  */
 export class WebhookResponseDto {
   @ApiPropertyOptional({
-    description: 'Whether the webhook was processed successfully',
-    example: true,
+    description: 'The fate assigned to this webhook claim',
+    example: 'processed',
+    enum: ['processed', 'duplicate', 'unmatched', 'signature_failed', 'normalization_failed', 'transition_rejected'],
   })
-  success: boolean;
+  claimFate: string;
+
+  @ApiPropertyOptional({
+    description: 'Provider that sent the webhook',
+    example: 'paystack',
+  })
+  provider?: string;
+
+  @ApiPropertyOptional({
+    description: 'Event type extracted from webhook',
+    example: 'charge.success',
+  })
+  eventType?: string;
+
+  @ApiPropertyOptional({
+    description: 'Transaction ID if webhook was matched',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  transactionId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Webhook log ID for audit trail',
+    example: 'wh_log_123',
+  })
+  webhookLogId?: string;
 
   @ApiPropertyOptional({
     description: 'Processing message',
-    example: 'Webhook processed successfully',
+    example: 'Webhook processed and state transition applied',
   })
-  message: string;
-
-  @ApiPropertyOptional({
-    description: 'Additional processing details (only in debug mode)',
-  })
-  details?: {
-    webhookLogId?: string;
-    transactionId?: string;
-    processingStatus?: string;
-    metrics?: {
-      totalDurationMs?: number;
-      signatureVerified?: boolean;
-      normalized?: boolean;
-      persisted?: boolean;
-    };
-    error?: {
-      message?: string;
-      type?: string;
-    };
-  };
+  message?: string;
 }
 
 /**

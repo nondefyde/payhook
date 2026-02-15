@@ -67,7 +67,7 @@ export class DeduplicationStage implements PipelineStage {
 
       // Filter out the current webhook (which was just persisted)
       const duplicates = existingWebhooks.filter(
-        w => w.id !== context.webhookLog?.id
+        (w) => w.id !== context.webhookLog?.id,
       );
 
       if (duplicates.length > 0) {

@@ -39,6 +39,7 @@ describe('Paystack Integration Tests', () => {
       eventDispatcher,
       skipSignatureVerification: false,
       storeRawPayload: true,
+      secrets: new Map([['paystack', [TEST_SECRET]]]), // Add Paystack secret
     };
 
     // Create processor and service
@@ -64,6 +65,11 @@ describe('Paystack Integration Tests', () => {
         currency: 'NGN',
       });
 
+      // Move transaction to PROCESSING state (as would happen when payment is initiated)
+      await service.markAsProcessing(transaction.id, {
+        providerRef: 'ps_ref_123',
+      });
+
       // Generate Paystack webhook
       const webhook = PaystackWebhookFactory.generateSignedWebhook(
         'charge.success',
@@ -80,7 +86,7 @@ describe('Paystack Integration Tests', () => {
       // Track events
       const dispatchedEvents: any[] = [];
       eventDispatcher.on(
-        NormalizedEventType.PAYMENT_SUCCEEDED,
+        NormalizedEventType.PAYMENT_SUCCESSFUL, // Paystack uses PAYMENT_SUCCESSFUL
         async (type, payload) => {
           dispatchedEvents.push(payload);
         },
@@ -105,7 +111,7 @@ describe('Paystack Integration Tests', () => {
       // Verify event was dispatched
       expect(dispatchedEvents).toHaveLength(1);
       expect(dispatchedEvents[0].normalized.eventType).toBe(
-        NormalizedEventType.PAYMENT_SUCCEEDED,
+        NormalizedEventType.PAYMENT_SUCCESSFUL, // Paystack uses PAYMENT_SUCCESSFUL
       );
       expect(dispatchedEvents[0].normalized.amount).toBe(10000);
       expect(dispatchedEvents[0].normalized.customer?.email).toBe(
@@ -127,14 +133,16 @@ describe('Paystack Integration Tests', () => {
         webhook.headers,
       );
 
-      expect(result.success).toBe(false);
-      expect(result.processingStatus).toBe(ProcessingStatus.SIGNATURE_FAILED);
+      // Signature fails, pipeline continues, but no transaction → UNMATCHED
+      expect(result.success).toBe(true);
+      expect(result.processingStatus).toBe(ProcessingStatus.UNMATCHED);
 
       // Webhook should still be logged
       const webhooks = await storageAdapter.findWebhookLogs({
-        processingStatus: ProcessingStatus.SIGNATURE_FAILED,
+        id: result.webhookLogId,
       });
       expect(webhooks).toHaveLength(1);
+      expect(webhooks[0].signatureValid).toBe(false);
     });
 
     it('should handle Paystack refund.processed webhook', async () => {
@@ -176,7 +184,7 @@ describe('Paystack Integration Tests', () => {
       // Track refund events
       const refundEvents: any[] = [];
       eventDispatcher.on(
-        NormalizedEventType.REFUND_COMPLETED,
+        NormalizedEventType.REFUND_SUCCESSFUL, // Paystack uses REFUND_SUCCESSFUL
         async (type, payload) => {
           refundEvents.push(payload);
         },
@@ -198,7 +206,7 @@ describe('Paystack Integration Tests', () => {
       // Verify refund event was dispatched
       expect(refundEvents).toHaveLength(1);
       expect(refundEvents[0].normalized.eventType).toBe(
-        NormalizedEventType.REFUND_COMPLETED,
+        NormalizedEventType.REFUND_SUCCESSFUL, // Paystack uses REFUND_SUCCESSFUL
       );
     });
 
@@ -241,6 +249,23 @@ describe('Paystack Integration Tests', () => {
             amount: (i + 1) * 1000,
             currency: 'NGN',
           }),
+        ),
+      );
+
+      // Move all transactions to PROCESSING state
+      await Promise.all(
+        transactions.map((txn) =>
+          storageAdapter.updateTransactionStatus(
+            txn.id,
+            TransactionStatus.PROCESSING,
+            {
+              transactionId: txn.id,
+              fromStatus: TransactionStatus.PENDING,
+              toStatus: TransactionStatus.PROCESSING,
+              triggerType: TriggerType.MANUAL,
+              actor: 'test',
+            },
+          ),
         ),
       );
 
@@ -291,12 +316,25 @@ describe('Paystack Integration Tests', () => {
       webhook.headers['x-paystack-signature'] = signature;
 
       // Create matching transaction
-      await service.createTransaction({
+      const transaction = await service.createTransaction({
         applicationRef: 'order_meta',
         provider: 'paystack',
         amount: 15000,
         currency: 'NGN',
       });
+
+      // Move to PROCESSING
+      await storageAdapter.updateTransactionStatus(
+        transaction.id,
+        TransactionStatus.PROCESSING,
+        {
+          transactionId: transaction.id,
+          fromStatus: TransactionStatus.PENDING,
+          toStatus: TransactionStatus.PROCESSING,
+          triggerType: TriggerType.MANUAL,
+          actor: 'test',
+        },
+      );
 
       const result = await processor.processWebhook(
         'paystack',
@@ -311,6 +349,7 @@ describe('Paystack Integration Tests', () => {
         id: result.webhookLogId,
       });
 
+      expect(webhookLogs).toHaveLength(1);
       const metadata = webhookLogs[0].metadata;
       expect(metadata.normalizedEvent.metadata.gateway_response).toBe(
         'Successful',

@@ -634,15 +634,15 @@ export class MockStorageAdapter implements StorageAdapter {
     const auditLog = new AuditLog(
       id,
       dto.transactionId,
-      dto.fromStatus !== undefined ? dto.fromStatus : null,
-      dto.toStatus!,
+      dto.stateBefore ?? dto.fromStatus ?? null, // stateBefore is primary, fromStatus is fallback
+      dto.stateAfter ?? dto.toStatus ?? TransactionStatus.PENDING, // stateAfter is primary, toStatus is fallback
       dto.triggerType as any,
       new Date(),
       dto.webhookLogId,
       dto.reconciliationResult !== undefined ? dto.reconciliationResult : null,
       dto.verificationMethod as any,
-      dto.metadata,
-      dto.actor,
+      dto.action ? { ...dto.metadata, action: dto.action } : dto.metadata, // Include action in metadata
+      dto.performedBy ?? dto.actor, // performedBy is primary, actor is fallback
       dto.reason,
     );
 

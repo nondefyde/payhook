@@ -209,6 +209,14 @@ export class StateEngineStage implements PipelineStage {
         },
       };
 
+      // Link provider reference if available and not already linked
+      if (context.metadata?.providerRef && !transaction.providerRef) {
+        await this.storageAdapter.linkProviderRef(
+          transaction.id,
+          context.metadata.providerRef,
+        );
+      }
+
       // Update transaction status with audit
       const updatedTransaction =
         await this.storageAdapter.updateTransactionStatus(

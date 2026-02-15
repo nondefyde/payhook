@@ -63,6 +63,7 @@ export class TransactionService {
       performedAt: new Date(),
       stateBefore: null,
       stateAfter: transaction.status,
+      triggerType: TriggerType.MANUAL,
       metadata: {
         applicationRef: dto.applicationRef,
         provider: dto.provider,
@@ -120,6 +121,7 @@ export class TransactionService {
       performedAt: new Date(),
       stateBefore: transaction.status,
       stateAfter: TransactionStatus.PROCESSING,
+      triggerType: TriggerType.MANUAL,
       metadata: {
         providerRef: dto.providerRef,
         verificationMethod: dto.verificationMethod,
@@ -380,6 +382,7 @@ export class TransactionService {
         performedAt: new Date(),
         stateBefore: transaction.status,
         stateAfter: transaction.status,
+        triggerType: TriggerType.RECONCILIATION,
         metadata: {
           providerStatus: providerResult.status,
           expectedStatus,
@@ -502,6 +505,7 @@ export class TransactionService {
       performedAt: new Date(),
       stateBefore: transaction.status,
       stateAfter: transaction.status,
+      triggerType: TriggerType.MANUAL,
       metadata: {
         updatedFields: Object.keys(metadata),
       },

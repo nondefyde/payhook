@@ -14,25 +14,25 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { RawBodyInterceptor } from '../interceptors/raw-body.interceptor';
 import { WebhookProcessor, ProcessingResult } from '../../../core';
-import {
-  ApiWebhookEndpoint,
-  ApiCustomWebhookEndpoint,
-} from '../../../_shared/swagger/decorators';
-import { WebhookResponseDto } from '../../../_shared/dto';
+import { ApiWebhookEndpoint } from '../../../_shared';
+import { WebhookResponseDto } from '../../../_shared';
+import { WEBHOOK_PROCESSOR, PAYHOOK_CONFIG } from '../constants';
 
 /**
  * Webhook Controller
- * Using shared Swagger decorators for cleaner code and better maintainability
+ *
+ * Essential HTTP endpoint for receiving webhooks from payment providers.
+ * This MUST be HTTP because external providers need to POST to it.
  */
-@ApiTags('Webhooks')
+@ApiTags('Ingest')
 @Controller('webhooks')
 export class WebhookController {
   private readonly logger = new Logger(WebhookController.name);
 
   constructor(
-    @Inject(WebhookProcessor)
+    @Inject(WEBHOOK_PROCESSOR)
     private readonly webhookProcessor: WebhookProcessor,
-    @Inject('PAYHOOK_CONFIG')
+    @Inject(PAYHOOK_CONFIG)
     private readonly config: any,
   ) {}
 
@@ -74,69 +74,57 @@ export class WebhookController {
     } catch (error) {
       this.logger.error(`Webhook processing error: ${error}`, error);
 
+      // Even errors get logged and return 200 with a fate
+      // Only return 400 for truly unparseable requests
+      if (error instanceof BadRequestException && error.message.includes('body is required')) {
+        throw error; // Let NestJS handle this as 400
+      }
+
+      // All other errors get a fate and 200 response
       return {
-        success: false,
-        message: 'Webhook processing failed',
-        details: this.config.debug
-          ? {
-              error: {
-                message: error instanceof Error ? error.message : String(error),
-                type: error instanceof Error ? error.name : 'Unknown',
-              },
-            }
-          : undefined,
+        claimFate: 'parse_error',
+        provider: provider.toLowerCase(),
+        message: 'Webhook could not be processed but was logged',
+        webhookLogId: undefined, // May not have been created
       };
     }
-  }
-
-  /**
-   * Receive webhook with custom endpoint path
-   */
-  @Post('custom/:customPath/:provider')
-  @HttpCode(HttpStatus.OK)
-  @UseInterceptors(RawBodyInterceptor)
-  @ApiCustomWebhookEndpoint()
-  async handleCustomWebhook(
-    @Param('customPath') customPath: string,
-    @Param('provider') provider: string,
-    @Body() rawBody: Buffer,
-    @Headers() headers: Record<string, string>,
-  ): Promise<WebhookResponseDto> {
-    this.logger.log(
-      `Received webhook at custom path: ${customPath}/${provider}`,
-    );
-
-    // Delegate to main handler
-    return this.handleWebhook(provider, rawBody, headers);
   }
 
   private formatResponse(result: ProcessingResult): WebhookResponseDto {
-    const response: WebhookResponseDto = {
-      success: result.success,
-      message: result.success
-        ? 'Webhook processed successfully'
-        : 'Webhook processing completed with errors',
+    // Map processing status to claim fate
+    const fateMap: Record<string, string> = {
+      PROCESSED: 'processed',
+      DUPLICATE: 'duplicate',
+      UNMATCHED: 'unmatched',
+      SIGNATURE_FAILED: 'signature_failed',
+      NORMALIZATION_FAILED: 'normalization_failed',
+      TRANSITION_REJECTED: 'transition_rejected',
+      PARSE_ERROR: 'parse_error',
     };
 
-    if (this.config.debug) {
-      response.details = {
-        webhookLogId: result.webhookLogId,
-        transactionId: result.transactionId,
-        processingStatus: result.processingStatus,
-        metrics: result.metrics
-          ? {
-              totalDurationMs: result.metrics.totalDurationMs,
-              signatureVerified: result.metrics.signatureVerified,
-              normalized: result.metrics.normalized,
-              persisted: result.metrics.persisted,
-            }
-          : undefined,
-        error: result.error
-          ? { message: result.error.message, type: result.error.name }
-          : undefined,
-      };
-    }
+    const claimFate = fateMap[result.processingStatus] || 'unknown';
 
-    return response;
+    return {
+      claimFate,
+      provider: result.context?.provider,
+      eventType: result.context?.metadata?.eventType,
+      transactionId: result.transactionId,
+      webhookLogId: result.webhookLogId,
+      message: this.getMessageForFate(claimFate),
+    };
+  }
+
+  private getMessageForFate(fate: string): string {
+    const messages: Record<string, string> = {
+      processed: 'Webhook processed and state transition applied',
+      duplicate: 'Duplicate webhook detected and skipped',
+      unmatched: 'Webhook logged but no matching transaction found',
+      signature_failed: 'Webhook signature verification failed',
+      normalization_failed: 'Webhook could not be normalized to expected format',
+      transition_rejected: 'State transition rejected by state machine',
+      parse_error: 'Webhook payload could not be parsed',
+      unknown: 'Webhook processing completed',
+    };
+    return messages[fate] || messages.unknown;
   }
 }

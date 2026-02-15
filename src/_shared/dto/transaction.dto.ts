@@ -101,15 +101,6 @@ export class MarkAsProcessingDto {
   providerCreatedAt?: Date;
 
   @ApiPropertyOptional({
-    description: 'How transaction will be verified',
-    enum: VerificationMethod,
-    example: VerificationMethod.WEBHOOK_ONLY,
-  })
-  @IsOptional()
-  @IsEnum(VerificationMethod)
-  verificationMethod?: VerificationMethod;
-
-  @ApiPropertyOptional({
     description: 'User or system performing this action',
     example: 'user@example.com',
   })
@@ -265,4 +256,101 @@ export class ScanStaleTransactionsDto {
   @IsOptional()
   @IsString()
   provider?: string;
+}
+
+/**
+ * Transaction Response DTO
+ * Standard response format for transaction endpoints
+ */
+export class TransactionResponseDto {
+  @ApiProperty({
+    description: 'Transaction ID',
+    format: 'uuid',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  id: string;
+
+  @ApiProperty({
+    description: 'Your application reference',
+    example: 'order_123',
+  })
+  applicationRef: string;
+
+  @ApiPropertyOptional({
+    description: 'Reference ID from payment provider',
+    example: 'ps_ref_123',
+    type: 'string',
+    nullable: true,
+  })
+  providerRef: string | null;
+
+  @ApiProperty({
+    description: 'Payment provider name',
+    example: 'paystack',
+  })
+  provider: string;
+
+  @ApiProperty({
+    description: 'Current transaction status',
+    enum: TransactionStatus,
+    example: 'successful',
+  })
+  status: TransactionStatus;
+
+  @ApiProperty({
+    description: 'Amount in smallest currency unit (e.g., kobo, cents)',
+    example: 10000,
+    type: 'integer',
+  })
+  amount: number;
+
+  @ApiProperty({
+    description: 'ISO 4217 currency code',
+    example: 'NGN',
+  })
+  currency: string;
+
+  @ApiProperty({
+    description: 'Verification confidence level',
+    enum: ['webhook_only', 'api_verified', 'reconciled'],
+    example: 'webhook_only',
+  })
+  verificationMethod: string;
+
+  @ApiProperty({
+    description: 'Whether transaction has reached a terminal state',
+    example: true,
+  })
+  isSettled: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Additional metadata stored with transaction',
+    example: { customerId: 'cust_123', orderId: 'order_456' },
+    type: 'object',
+    additionalProperties: true,
+  })
+  metadata?: Record<string, any>;
+
+  @ApiProperty({
+    description: 'Transaction creation timestamp',
+    format: 'date-time',
+    example: '2024-02-14T12:00:00Z',
+  })
+  createdAt: Date;
+
+  @ApiProperty({
+    description: 'Last update timestamp',
+    format: 'date-time',
+    example: '2024-02-14T12:01:00Z',
+  })
+  updatedAt: Date;
+
+  @ApiPropertyOptional({
+    description: 'When transaction was created at payment provider',
+    type: 'string',
+    format: 'date-time',
+    example: '2024-02-14T12:00:30Z',
+    nullable: true,
+  })
+  providerCreatedAt?: Date | null;
 }

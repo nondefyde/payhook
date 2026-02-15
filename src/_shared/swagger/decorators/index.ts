@@ -7,4 +7,3 @@
 
 export * from './webhook.decorators';
 export * from './transaction.decorators';
-export * from './health.decorators';

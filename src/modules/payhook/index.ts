@@ -17,7 +17,6 @@ export { defaultPayHookConfig } from './payhook.config';
 // Controllers
 export { WebhookController } from './controllers/webhook.controller';
 export { TransactionController } from './controllers/transaction.controller';
-export { HealthController } from './controllers/health.controller';
 
 // Services
 export { PayHookService } from './services/payhook.service';

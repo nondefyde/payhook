@@ -7,6 +7,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { TransactionStatus } from '../../../core/domain/enums';
+import { TransactionResponseDto } from '../../dto';
 
 /**
  * Swagger decorator for creating transactions
@@ -14,163 +15,54 @@ import { TransactionStatus } from '../../../core/domain/enums';
 export const ApiCreateTransaction = () => {
   return applyDecorators(
     ApiOperation({
-      summary: 'Create a new transaction',
+      summary: 'Create new transaction',
       description:
-        'Creates a new transaction in PENDING state before payment provider handoff',
-    }),
-    ApiBody({
-      description: 'Transaction creation data',
-      schema: {
-        type: 'object',
-        required: ['applicationRef', 'provider', 'amount', 'currency'],
-        properties: {
-          applicationRef: {
-            type: 'string',
-            example: 'order_123',
-            description: 'Unique reference from your application',
-          },
-          provider: {
-            type: 'string',
-            example: 'paystack',
-            description: 'Payment provider to use',
-          },
-          amount: {
-            type: 'number',
-            example: 10000,
-            description: 'Amount in smallest currency unit (e.g., kobo, cents)',
-          },
-          currency: {
-            type: 'string',
-            example: 'NGN',
-            description: 'ISO 4217 currency code',
-          },
-          metadata: {
-            type: 'object',
-            description: 'Additional metadata to store with transaction',
-          },
-        },
-      },
+        'Initializes a new transaction in PENDING state before redirecting to payment provider',
     }),
     ApiResponse({
       status: 201,
       description: 'Transaction created successfully',
+      type: TransactionResponseDto,
     }),
     ApiResponse({
       status: 400,
-      description: 'Invalid input or duplicate application reference',
+      description: 'Invalid request data or duplicate application reference',
     }),
   );
 };
 
 /**
- * Swagger decorator for getting transaction with options
+ * Swagger decorator for getting transaction by application reference
  */
-export const ApiGetTransaction = (options?: {
-  byApplicationRef?: boolean;
-  byProviderRef?: boolean;
-  auditTrailOnly?: boolean;
-  webhooksOnly?: boolean;
-  settledCheck?: boolean;
-}) => {
-  // Determine operation summary based on options
-  let summary = 'Get transaction by ID';
-  let description =
-    'Retrieves transaction details with optional verification and related data';
-
-  if (options?.byApplicationRef) {
-    summary = 'Get transaction by application reference';
-    description = 'Retrieves transaction using your application reference';
-  } else if (options?.byProviderRef) {
-    summary = 'Get transaction by provider reference';
-    description = 'Retrieves transaction using payment provider reference';
-  } else if (options?.auditTrailOnly) {
-    summary = 'Get transaction audit trail';
-    description = 'Retrieves complete audit history for a transaction';
-  } else if (options?.webhooksOnly) {
-    summary = 'Get transaction webhooks';
-    description = 'Retrieves all webhook logs associated with a transaction';
-  } else if (options?.settledCheck) {
-    summary = 'Check if transaction is settled';
-    description = 'Checks if a transaction has reached a terminal state';
-  }
-
-  const decorators = [
-    ApiOperation({ summary, description }),
+export const ApiGetTransactionByAppRef = () => {
+  return applyDecorators(
+    ApiOperation({
+      summary: 'Get transaction by application reference',
+      description:
+        'The "did money come in?" query - returns transaction status and settlement info',
+    }),
+    ApiParam({
+      name: 'applicationRef',
+      description: 'Your application reference',
+      example: 'order_123',
+    }),
+    ApiQuery({
+      name: 'verify',
+      required: false,
+      type: 'boolean',
+      description: 'Call provider API to verify current status. Upgrades verificationMethod if confirmed.',
+      schema: { type: 'boolean', default: false },
+    }),
     ApiResponse({
       status: 200,
-      description: 'Request successful',
+      description: 'Transaction found',
+      type: TransactionResponseDto,
     }),
     ApiResponse({
       status: 404,
       description: 'Transaction not found',
     }),
-  ];
-
-  // Add specific parameters based on options
-  if (!options?.byApplicationRef && !options?.byProviderRef) {
-    decorators.push(
-      ApiParam({
-        name: 'id',
-        description: 'Transaction ID (UUID)',
-        example: '550e8400-e29b-41d4-a716-446655440000',
-      }),
-    );
-  }
-
-  if (options?.byApplicationRef) {
-    decorators.push(
-      ApiParam({
-        name: 'applicationRef',
-        description: 'Application reference',
-        example: 'order_123',
-      }),
-    );
-  }
-
-  if (options?.byProviderRef) {
-    decorators.push(
-      ApiParam({
-        name: 'provider',
-        description: 'Payment provider name',
-        example: 'paystack',
-      }),
-      ApiParam({
-        name: 'providerRef',
-        description: 'Provider reference ID',
-        example: 'ps_ref_123',
-      }),
-    );
-  }
-
-  // Add query parameters for standard transaction get
-  if (
-    !options?.auditTrailOnly &&
-    !options?.webhooksOnly &&
-    !options?.settledCheck
-  ) {
-    decorators.push(
-      ApiQuery({
-        name: 'verify',
-        required: false,
-        type: 'boolean',
-        description: 'Verify transaction status with payment provider API',
-      }),
-      ApiQuery({
-        name: 'includeWebhooks',
-        required: false,
-        type: 'boolean',
-        description: 'Include associated webhook logs in response',
-      }),
-      ApiQuery({
-        name: 'includeAuditTrail',
-        required: false,
-        type: 'boolean',
-        description: 'Include complete audit trail in response',
-      }),
-    );
-  }
-
-  return applyDecorators(...decorators);
+  );
 };
 
 /**
@@ -181,46 +73,25 @@ export const ApiMarkAsProcessing = () => {
     ApiOperation({
       summary: 'Mark transaction as processing',
       description:
-        'Updates transaction to PROCESSING state after successful provider handoff',
+        'Updates transaction to PROCESSING state and links provider reference after redirect',
     }),
     ApiParam({
       name: 'id',
       description: 'Transaction ID',
-    }),
-    ApiBody({
-      schema: {
-        type: 'object',
-        required: ['providerRef'],
-        properties: {
-          providerRef: {
-            type: 'string',
-            example: 'ps_ref_123',
-            description: 'Reference ID from payment provider',
-          },
-          verificationMethod: {
-            type: 'string',
-            enum: ['WEBHOOK_ONLY', 'WEBHOOK_AND_API'],
-            description: 'How transaction will be verified',
-          },
-          performedBy: {
-            type: 'string',
-            example: 'user@example.com',
-            description: 'Who performed this action',
-          },
-        },
-      },
+      example: '550e8400-e29b-41d4-a716-446655440000',
     }),
     ApiResponse({
       status: 200,
-      description: 'Transaction marked as processing',
-    }),
-    ApiResponse({
-      status: 400,
-      description: 'Invalid state transition',
+      description: 'Transaction updated successfully',
+      type: TransactionResponseDto,
     }),
     ApiResponse({
       status: 404,
       description: 'Transaction not found',
+    }),
+    ApiResponse({
+      status: 400,
+      description: 'Invalid state transition',
     }),
   );
 };
